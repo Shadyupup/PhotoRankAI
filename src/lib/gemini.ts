@@ -16,6 +16,11 @@ function getGenAI() {
 const resultSchema = {
     type: SchemaType.OBJECT,
     properties: {
+        file_id: {
+            type: SchemaType.STRING,
+            description: "The unique ID of the photo as provided in the prompt",
+            nullable: false,
+        },
         score: {
             type: SchemaType.NUMBER,
             description: "Aesthetic score from 1.0 to 10.0",
@@ -27,7 +32,7 @@ const resultSchema = {
             nullable: false,
         },
     },
-    required: ["score", "reason"],
+    required: ["file_id", "score", "reason"],
 };
 
 const batchSchema = {
@@ -37,7 +42,7 @@ const batchSchema = {
         results: {
             type: SchemaType.ARRAY,
             items: resultSchema,
-            description: "Scores and reasons for each photo in the provided order"
+            description: "Scores and reasons for each photo, including their IDs"
         }
     },
     required: ["results"],
@@ -53,50 +58,82 @@ const MODELS = [
     "gemini-2.5-pro",       // High quality fallback
 ];
 
-async function tryGenerate(modelName: string, images: { data: string, mimeType: string }[]) {
+async function tryGenerate(modelName: string, items: { id: string, data: string, mimeType: string }[], signal?: AbortSignal) {
+    if (signal?.aborted) throw new Error("Aborted before generation");
+
     const model = getGenAI().getGenerativeModel({
         model: modelName,
         generationConfig: {
             responseMimeType: "application/json",
             responseSchema: batchSchema,
         },
+        // Note: The SDK might not fully support AbortSignal in all environments yet, 
+        // but checking it explicitly helps save resources if already cancelled.
     });
 
     const promptMessages = [
-        `Analyze the aesthetic quality of these ${images.length} photos for a professional photographer. 
-         Return a JSON object with a "results" array containing the score and reason for each photo in the sequence provided. 
+        `Analyze the aesthetic quality of these ${items.length} photos for a professional photographer. 
+         The photos correspond to the following IDs in order: ${JSON.stringify(items.map(i => i.id))}.
+         Return a JSON object with a "results" array containing the 'file_id', 'score', and 'reason' for each photo. 
+         IMPORTANT: You must include the correct 'file_id' provided for each result.
          Strictly follow the JSON schema.`,
-        ...images.map(img => ({ inlineData: img }))
+        ...items.map(item => ({ inlineData: { data: item.data, mimeType: item.mimeType } }))
     ];
 
-    logger.info(`Sending request to ${modelName} with ${images.length} images...`);
+    logger.info(`Sending request to ${modelName} with ${items.length} images...`);
+
+    if (signal?.aborted) throw new Error("Aborted");
+
     const start = Date.now();
-    const result = await model.generateContent(promptMessages);
+
+    // We can't cancel the HTTP request easily with this SDK version, 
+    // but we can reject early if the signal fires during the await.
+    const result = await Promise.race([
+        model.generateContent(promptMessages),
+        new Promise<never>((_, reject) => {
+            if (signal) {
+                signal.addEventListener("abort", () => reject(new Error("Request Aborted")));
+            }
+        })
+    ]);
+
     logger.info(`Received response from ${modelName} in ${Date.now() - start}ms`);
     return result;
 }
 
-export async function analyzePhotosBatch(blobs: Blob[]): Promise<{ score: number; reason: string }[]> {
+export async function analyzePhotosBatch(items: { id: string, blob: Blob }[], signal?: AbortSignal): Promise<{ file_id: string; score: number; reason: string }[]> {
     return Promise.race([
-        analyzeInternalBatch(blobs),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Global analysis timeout (60s)")), 60000))
+        analyzeInternalBatch(items, signal),
+        new Promise<never>((_, reject) => {
+            const timer = setTimeout(() => reject(new Error("Global analysis timeout (60s)")), 60000);
+            if (signal) {
+                signal.addEventListener("abort", () => {
+                    clearTimeout(timer);
+                    reject(new Error("Analysis Aborted"));
+                });
+            }
+        })
     ]);
 }
 
-async function analyzeInternalBatch(blobs: Blob[]): Promise<{ score: number; reason: string }[]> {
+async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?: AbortSignal): Promise<{ file_id: string; score: number; reason: string }[]> {
     if (!API_KEY) throw new Error("API Key not found");
+    if (signal?.aborted) throw new Error("Aborted");
 
-    const images = await Promise.all(blobs.map(async blob => ({
-        data: await blobToBase64(blob),
+    const images = await Promise.all(items.map(async item => ({
+        id: item.id,
+        data: await blobToBase64(item.blob),
         mimeType: "image/jpeg"
     })));
 
     let lastError;
 
     for (const modelName of MODELS) {
+        if (signal?.aborted) throw new Error("Aborted");
+
         try {
             logger.info(`Attempting analysis with model: ${modelName}`);
-            const result = await tryGenerate(modelName, images);
+            const result = await tryGenerate(modelName, images, signal);
 
             logger.info(`Raw response received. Extracting text...`);
             const text = result.response.text();
@@ -111,10 +148,17 @@ async function analyzeInternalBatch(blobs: Blob[]): Promise<{ score: number; rea
                 throw new Error(`Invalid JSON response: ${text.substring(0, 100)}...`);
             }
 
-            if (!parsed.results || parsed.results.length !== blobs.length) {
-                logger.error(`Invalid structure: results=${parsed?.results?.length}, expected=${blobs.length}`);
-                throw new Error("Invalid batch response length");
+            if (!parsed.results || !Array.isArray(parsed.results)) {
+                logger.error(`Invalid structure: results is missing or not an array`);
+                throw new Error("Invalid batch response structure");
             }
+
+            // Optional: Verify IDs exist? Or just leave it to the caller to match.
+            // Let's at least check length roughly matches or is non-empty.
+            if (parsed.results.length === 0 && items.length > 0) {
+                throw new Error("AI returned empty results array");
+            }
+
             return parsed.results;
         } catch (err: unknown) {
             const error = err instanceof Error ? err : new Error(String(err));

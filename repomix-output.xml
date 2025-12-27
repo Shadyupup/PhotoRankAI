@@ -1,0 +1,2845 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+public/
+  vite.svg
+src/
+  assets/
+    react.svg
+  components/
+    AdminDashboard.tsx
+    AppShell.tsx
+    DebugConsole.tsx
+    Header.tsx
+    PhotoCard.tsx
+    PhotoDetailModal.tsx
+    PhotoGrid.tsx
+    ScoreBadge.tsx
+    Toolbar.tsx
+  hooks/
+    useAIPipeline.ts
+    useDirectoryLoader.ts
+    useResizeObserver.ts
+  lib/
+    db.ts
+    gemini.ts
+    logger.ts
+    utils.ts
+  workers/
+    imageProcessor.worker.ts
+  App.css
+  App.tsx
+  gemini.test.ts
+  index.css
+  integration.test.tsx
+  main.tsx
+  vite-env.d.ts
+test_images/
+  sample.jpg
+.check
+.checker
+.gitignore
+eslint.config.js
+index.html
+package.json
+postcss.config.js
+README.md
+tailwind.config.js
+tsconfig.app.json
+tsconfig.json
+tsconfig.node.json
+vite.config.ts
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="public/vite.svg">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="31.88" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 257"><defs><linearGradient id="IconifyId1813088fe1fbc01fb466" x1="-.828%" x2="57.636%" y1="7.652%" y2="78.411%"><stop offset="0%" stop-color="#41D1FF"></stop><stop offset="100%" stop-color="#BD34FE"></stop></linearGradient><linearGradient id="IconifyId1813088fe1fbc01fb467" x1="43.376%" x2="50.316%" y1="2.242%" y2="89.03%"><stop offset="0%" stop-color="#FFEA83"></stop><stop offset="8.333%" stop-color="#FFDD35"></stop><stop offset="100%" stop-color="#FFA800"></stop></linearGradient></defs><path fill="url(#IconifyId1813088fe1fbc01fb466)" d="M255.153 37.938L134.897 252.976c-2.483 4.44-8.862 4.466-11.382.048L.875 37.958c-2.746-4.814 1.371-10.646 6.827-9.67l120.385 21.517a6.537 6.537 0 0 0 2.322-.004l117.867-21.483c5.438-.991 9.574 4.796 6.877 9.62Z"></path><path fill="url(#IconifyId1813088fe1fbc01fb467)" d="M185.432.063L96.44 17.501a3.268 3.268 0 0 0-2.634 3.014l-5.474 92.456a3.268 3.268 0 0 0 3.997 3.378l24.777-5.718c2.318-.535 4.413 1.507 3.936 3.838l-7.361 36.047c-.495 2.426 1.782 4.5 4.151 3.78l15.304-4.649c2.372-.72 4.652 1.36 4.15 3.788l-11.698 56.621c-.732 3.542 3.979 5.473 5.943 2.437l1.313-2.028l72.516-144.72c1.215-2.423-.88-5.186-3.54-4.672l-25.505 4.922c-2.396.462-4.435-1.77-3.759-4.114l16.646-57.705c.677-2.35-1.37-4.583-3.769-4.113Z"></path></svg>
+</file>
+
+<file path="src/assets/react.svg">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="35.93" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 228"><path fill="#00D8FF" d="M210.483 73.824a171.49 171.49 0 0 0-8.24-2.597c.465-1.9.893-3.777 1.273-5.621c6.238-30.281 2.16-54.676-11.769-62.708c-13.355-7.7-35.196.329-57.254 19.526a171.23 171.23 0 0 0-6.375 5.848a155.866 155.866 0 0 0-4.241-3.917C100.759 3.829 77.587-4.822 63.673 3.233C50.33 10.957 46.379 33.89 51.995 62.588a170.974 170.974 0 0 0 1.892 8.48c-3.28.932-6.445 1.924-9.474 2.98C17.309 83.498 0 98.307 0 113.668c0 15.865 18.582 31.778 46.812 41.427a145.52 145.52 0 0 0 6.921 2.165a167.467 167.467 0 0 0-2.01 9.138c-5.354 28.2-1.173 50.591 12.134 58.266c13.744 7.926 36.812-.22 59.273-19.855a145.567 145.567 0 0 0 5.342-4.923a168.064 168.064 0 0 0 6.92 6.314c21.758 18.722 43.246 26.282 56.54 18.586c13.731-7.949 18.194-32.003 12.4-61.268a145.016 145.016 0 0 0-1.535-6.842c1.62-.48 3.21-.974 4.76-1.488c29.348-9.723 48.443-25.443 48.443-41.52c0-15.417-17.868-30.326-45.517-39.844Zm-6.365 70.984c-1.4.463-2.836.91-4.3 1.345c-3.24-10.257-7.612-21.163-12.963-32.432c5.106-11 9.31-21.767 12.459-31.957c2.619.758 5.16 1.557 7.61 2.4c23.69 8.156 38.14 20.213 38.14 29.504c0 9.896-15.606 22.743-40.946 31.14Zm-10.514 20.834c2.562 12.94 2.927 24.64 1.23 33.787c-1.524 8.219-4.59 13.698-8.382 15.893c-8.067 4.67-25.32-1.4-43.927-17.412a156.726 156.726 0 0 1-6.437-5.87c7.214-7.889 14.423-17.06 21.459-27.246c12.376-1.098 24.068-2.894 34.671-5.345a134.17 134.17 0 0 1 1.386 6.193ZM87.276 214.515c-7.882 2.783-14.16 2.863-17.955.675c-8.075-4.657-11.432-22.636-6.853-46.752a156.923 156.923 0 0 1 1.869-8.499c10.486 2.32 22.093 3.988 34.498 4.994c7.084 9.967 14.501 19.128 21.976 27.15a134.668 134.668 0 0 1-4.877 4.492c-9.933 8.682-19.886 14.842-28.658 17.94ZM50.35 144.747c-12.483-4.267-22.792-9.812-29.858-15.863c-6.35-5.437-9.555-10.836-9.555-15.216c0-9.322 13.897-21.212 37.076-29.293c2.813-.98 5.757-1.905 8.812-2.773c3.204 10.42 7.406 21.315 12.477 32.332c-5.137 11.18-9.399 22.249-12.634 32.792a134.718 134.718 0 0 1-6.318-1.979Zm12.378-84.26c-4.811-24.587-1.616-43.134 6.425-47.789c8.564-4.958 27.502 2.111 47.463 19.835a144.318 144.318 0 0 1 3.841 3.545c-7.438 7.987-14.787 17.08-21.808 26.988c-12.04 1.116-23.565 2.908-34.161 5.309a160.342 160.342 0 0 1-1.76-7.887Zm110.427 27.268a347.8 347.8 0 0 0-7.785-12.803c8.168 1.033 15.994 2.404 23.343 4.08c-2.206 7.072-4.956 14.465-8.193 22.045a381.151 381.151 0 0 0-7.365-13.322Zm-45.032-43.861c5.044 5.465 10.096 11.566 15.065 18.186a322.04 322.04 0 0 0-30.257-.006c4.974-6.559 10.069-12.652 15.192-18.18ZM82.802 87.83a323.167 323.167 0 0 0-7.227 13.238c-3.184-7.553-5.909-14.98-8.134-22.152c7.304-1.634 15.093-2.97 23.209-3.984a321.524 321.524 0 0 0-7.848 12.897Zm8.081 65.352c-8.385-.936-16.291-2.203-23.593-3.793c2.26-7.3 5.045-14.885 8.298-22.6a321.187 321.187 0 0 0 7.257 13.246c2.594 4.48 5.28 8.868 8.038 13.147Zm37.542 31.03c-5.184-5.592-10.354-11.779-15.403-18.433c4.902.192 9.899.29 14.978.29c5.218 0 10.376-.117 15.453-.343c-4.985 6.774-10.018 12.97-15.028 18.486Zm52.198-57.817c3.422 7.8 6.306 15.345 8.596 22.52c-7.422 1.694-15.436 3.058-23.88 4.071a382.417 382.417 0 0 0 7.859-13.026a347.403 347.403 0 0 0 7.425-13.565Zm-16.898 8.101a358.557 358.557 0 0 1-12.281 19.815a329.4 329.4 0 0 1-23.444.823c-7.967 0-15.716-.248-23.178-.732a310.202 310.202 0 0 1-12.513-19.846h.001a307.41 307.41 0 0 1-10.923-20.627a310.278 310.278 0 0 1 10.89-20.637l-.001.001a307.318 307.318 0 0 1 12.413-19.761c7.613-.576 15.42-.876 23.31-.876H128c7.926 0 15.743.303 23.354.883a329.357 329.357 0 0 1 12.335 19.695a358.489 358.489 0 0 1 11.036 20.54a329.472 329.472 0 0 1-11 20.722Zm22.56-122.124c8.572 4.944 11.906 24.881 6.52 51.026c-.344 1.668-.73 3.367-1.15 5.09c-10.622-2.452-22.155-4.275-34.23-5.408c-7.034-10.017-14.323-19.124-21.64-27.008a160.789 160.789 0 0 1 5.888-5.4c18.9-16.447 36.564-22.941 44.612-18.3ZM128 90.808c12.625 0 22.86 10.235 22.86 22.86s-10.235 22.86-22.86 22.86s-22.86-10.235-22.86-22.86s10.235-22.86 22.86-22.86Z"></path></svg>
+</file>
+
+<file path="src/components/AdminDashboard.tsx">
+import { useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/lib/db';
+import { testGeminiConnection } from '@/lib/gemini';
+import { X, RefreshCw, Trash2, Search, CheckCircle2, AlertCircle, Clock, Loader2, Database, Wifi } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { logger } from '@/lib/logger';
+import { toast } from 'sonner';
+
+interface AdminDashboardProps {
+    onClose: () => void;
+    onRetry: () => void;
+}
+
+export function AdminDashboard({ onClose, onRetry }: AdminDashboardProps) {
+    const [search, setSearch] = useState('');
+    const [filter, setFilter] = useState<string>('all');
+
+    const stats = useLiveQuery(async () => {
+        return {
+            total: await db.photos.count(),
+            new: await db.photos.where('status').equals('new').count(),
+            processing: await db.photos.where('status').equals('processing').count(),
+            done: await db.photos.where('status').equals('done').count(),
+            queued: await db.photos.where('status').equals('queued').count(),
+            analyzing: await db.photos.where('status').equals('analyzing').count(),
+            scored: await db.photos.where('status').equals('scored').count(),
+            error: await db.photos.where('status').equals('error').count(),
+        };
+    }) || { total: 0, new: 0, processing: 0, done: 0, queued: 0, analyzing: 0, scored: 0, error: 0 };
+
+    const jobs = useLiveQuery(async () => {
+        let result = await db.photos.reverse().sortBy('createdAt');
+        if (filter !== 'all') {
+            result = result.filter(p => p.status === filter);
+        }
+        if (search) {
+            result = result.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.id.toLowerCase().includes(search.toLowerCase()));
+        }
+        return result;
+    }, [search, filter]) || [];
+
+    const handleClearAll = async () => {
+        if (confirm('Are you sure you want to CLEAR ALL DATA? This cannot be undone.')) {
+            await db.photos.clear();
+            await db.logs.clear();
+            logger.warn('Administrative Data Wipe performed');
+        }
+    };
+
+    const handleResetPipeline = async () => {
+        const stuck = await db.photos.where('status').equals('analyzing').toArray();
+        await db.transaction('rw', db.photos, async () => {
+            for (const p of stuck) {
+                await db.photos.update(p.id, { status: 'queued', updatedAt: Date.now() });
+            }
+        });
+        window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
+        logger.info(`Reset ${stuck.length} analyzing tasks back to queue`);
+    };
+
+    return (
+        <div className="fixed inset-0 z-[100] bg-[#0A0A0A] flex flex-col animate-in fade-in duration-300">
+            {/* Header */}
+            <div className="h-16 border-b border-[#262626] flex items-center justify-between px-6 bg-[#111111]">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-blue-600/20 flex items-center justify-center border border-blue-600/30">
+                        <Database size={18} className="text-blue-500" />
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-bold">Admin Console</h2>
+                        <p className="text-xs text-gray-500">Live Process Monitor & DB Management</p>
+                    </div>
+                </div>
+                <button
+                    onClick={onClose}
+                    className="p-2 hover:bg-[#262626] rounded-full transition-colors"
+                >
+                    <X size={20} className="text-gray-400" />
+                </button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-6 space-y-8">
+                {/* Stats Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+                    <StatCard title="Total" value={stats.total} icon={<Database size={14} />} color="gray" />
+                    <StatCard title="New" value={stats.new} icon={<Clock size={14} />} color="blue" />
+                    <StatCard title="Local Process" value={stats.processing} icon={<Loader2 size={14} className="animate-spin" />} color="yellow" />
+                    <StatCard title="Ready" value={stats.done} icon={<CheckCircle2 size={14} />} color="green" />
+                    <StatCard title="Queued" value={stats.queued} icon={<Clock size={14} />} color="yellow" />
+                    <StatCard title="AI Analyzing" value={stats.analyzing} icon={<RefreshCw size={14} className="animate-spin" />} color="blue" />
+                    <StatCard title="Scored" value={stats.scored} icon={<CheckCircle2 size={14} />} color="purple" />
+                    <StatCard title="Errors" value={stats.error} icon={<AlertCircle size={14} />} color="red" />
+                </div>
+
+                {/* Controls */}
+                <div className="bg-[#111111] border border-[#262626] rounded-2xl p-6 flex flex-wrap gap-4 items-center justify-between">
+                    <div className="flex items-center gap-4 flex-1 min-w-[300px]">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+                            <input
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                placeholder="Search jobs by name or ID..."
+                                className="w-full bg-[#1A1A1A] border border-[#262626] rounded-xl pl-10 pr-4 py-2 text-sm focus:border-blue-500 transition-all outline-none"
+                            />
+                        </div>
+                        <select
+                            value={filter}
+                            onChange={e => setFilter(e.target.value)}
+                            className="bg-[#1A1A1A] border border-[#262626] rounded-xl px-4 py-2 text-sm outline-none focus:border-blue-500"
+                        >
+                            <option value="all">All Statuses</option>
+                            <option value="queued">Queued</option>
+                            <option value="analyzing">Analyzing</option>
+                            <option value="scored">Scored</option>
+                            <option value="error">Error</option>
+                        </select>
+                    </div>
+                    <div className="flex gap-3">
+                        <button
+                            onClick={async () => {
+                                try {
+                                    toast.loading("Testing Gemini Connection...");
+                                    const result = await testGeminiConnection();
+                                    toast.dismiss();
+                                    toast.success("Connection Successful!", { description: `Response: ${result}` });
+                                } catch (e: any) {
+                                    toast.dismiss();
+                                    toast.error("Connection Failed", { description: e.message });
+                                }
+                            }}
+                            className="flex items-center gap-2 px-4 py-2 bg-purple-600/10 text-purple-400 border border-purple-600/30 rounded-xl hover:bg-purple-600/20 transition-all text-sm font-medium"
+                        >
+                            <Wifi size={16} /> Test API
+                        </button>
+                        <button
+                            onClick={handleResetPipeline}
+                            className="flex items-center gap-2 px-4 py-2 bg-yellow-600/10 text-yellow-500 border border-yellow-600/30 rounded-xl hover:bg-yellow-600/20 transition-all text-sm font-medium"
+                        >
+                            <RefreshCw size={16} /> Force Reset Pipeline
+                        </button>
+                        <button
+                            onClick={onRetry}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600/10 text-blue-400 border border-blue-600/30 rounded-xl hover:bg-blue-600/20 transition-all text-sm font-medium"
+                        >
+                            <AlertCircle size={16} /> Retry Errors
+                        </button>
+                        <button
+                            onClick={handleClearAll}
+                            className="flex items-center gap-2 px-4 py-2 bg-red-600/10 text-red-500 border border-red-600/30 rounded-xl hover:bg-red-600/20 transition-all text-sm font-medium"
+                        >
+                            <Trash2 size={16} /> Wipe All Data
+                        </button>
+                    </div>
+                </div>
+
+                {/* Table */}
+                <div className="bg-[#111111] border border-[#262626] rounded-2xl overflow-hidden">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-[#1A1A1A] text-gray-400 font-medium">
+                            <tr>
+                                <th className="px-6 py-4">Status</th>
+                                <th className="px-6 py-4">ID / Filename</th>
+                                <th className="px-6 py-4">Score</th>
+                                <th className="px-6 py-4">Updated</th>
+                                <th className="px-6 py-4 text-right">Reason / Error</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#262626]">
+                            {jobs.map(job => (
+                                <tr key={job.id} className="hover:bg-[#161616] transition-colors">
+                                    <td className="px-6 py-4">
+                                        <StatusBadge status={job.status} />
+                                    </td>
+                                    <td className="px-6 py-4 font-mono text-xs">{job.name}</td>
+                                    <td className="px-6 py-4">
+                                        {job.score ? <span className="font-bold text-blue-400">{job.score.toFixed(1)}</span> : '-'}
+                                    </td>
+                                    <td className="px-6 py-4 text-gray-400 text-xs">
+                                        {job.updatedAt ? new Date(job.updatedAt).toLocaleTimeString() : '-'}
+                                    </td>
+                                    <td className="px-6 py-4 text-right max-w-xs truncate text-gray-500 italic text-xs">
+                                        {job.reason || '-'}
+                                    </td>
+                                </tr>
+                            ))}
+                            {jobs.length === 0 && (
+                                <tr>
+                                    <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                                        No jobs matching your filters.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+interface StatCardProps {
+    title: string;
+    value: number;
+    icon: React.ReactNode;
+    color: 'gray' | 'blue' | 'green' | 'yellow' | 'red' | 'purple';
+}
+
+function StatCard({ title, value, icon, color }: StatCardProps) {
+    const colors: Record<string, string> = {
+        gray: "text-gray-400 bg-gray-400/10 border-gray-400/20",
+        blue: "text-blue-500 bg-blue-500/10 border-blue-500/20",
+        green: "text-green-500 bg-green-500/10 border-green-500/20",
+        yellow: "text-yellow-500 bg-yellow-500/10 border-yellow-500/20",
+        red: "text-red-500 bg-red-500/10 border-red-500/20",
+        purple: "text-purple-500 bg-purple-500/10 border-purple-500/20",
+    };
+    return (
+        <div className={cn("p-4 rounded-2xl border transition-all", colors[color])}>
+            <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] uppercase tracking-wider font-bold opacity-70">{title}</span>
+                {icon}
+            </div>
+            <div className="text-xl font-bold">{value}</div>
+        </div>
+    );
+}
+
+function StatusBadge({ status }: { status: string }) {
+    const styles: Record<string, string> = {
+        new: "bg-gray-500/10 text-gray-500 border-gray-500/20",
+        processing: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
+        done: "bg-green-500/10 text-green-500 border-green-500/20",
+        queued: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+        analyzing: "bg-blue-600/20 text-blue-500 border-blue-600/30 animate-pulse",
+        scored: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+        error: "bg-red-500/10 text-red-500 border-red-500/20",
+    };
+
+    return (
+        <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-tight", styles[status])}>
+            {status}
+        </span>
+    );
+}
+</file>
+
+<file path="src/components/AppShell.tsx">
+import { ReactNode } from 'react';
+
+export function AppShell({ children }: { children: ReactNode }) {
+    return (
+        <div className="flex flex-col h-screen w-full bg-[#0B0B0C] text-gray-100 overflow-hidden font-sans tracking-tight">
+            {/* Header - Glassmorphism */}
+            <header className="fixed top-0 left-0 right-0 h-16 border-b border-white/[0.08] flex items-center px-6 justify-between shrink-0 bg-[#0B0B0C]/80 backdrop-blur-xl z-50 transition-all duration-300">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-gradient-to-tr from-blue-500 to-purple-500 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
+                        <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                    </div>
+                    <span className="text-lg font-medium text-white/90 tracking-tight">
+                        PhotoRank <span className="text-gray-500 font-normal">AI</span>
+                    </span>
+                </div>
+            </header>
+
+            {/* Main Content - Pad top for fixed header */}
+            <main className="flex-1 flex flex-col pt-16 h-full relative overflow-hidden">
+                {children}
+            </main>
+        </div>
+    );
+}
+</file>
+
+<file path="src/components/DebugConsole.tsx">
+import { useState, useEffect } from 'react';
+import { X, Terminal } from 'lucide-react';
+
+export function DebugConsole() {
+    const [logs, setLogs] = useState<{ time: string, level: string, msg: string }[]>([]);
+    const [isOpen, setIsOpen] = useState(false);
+
+    useEffect(() => {
+        const handleLog = (e: CustomEvent<{ time: string, level: string, msg: string }>) => {
+            setLogs(prev => [...prev.slice(-49), e.detail]);
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        window.addEventListener('app-log', handleLog as any);
+        return () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            window.removeEventListener('app-log', handleLog as any);
+        };
+    }, []);
+
+    if (!isOpen) {
+        return (
+            <button
+                onClick={() => setIsOpen(true)}
+                className="fixed bottom-4 right-4 bg-black/80 text-green-400 p-2 rounded-lg border border-green-500/30 z-50 hover:bg-black font-mono text-xs flex items-center gap-2"
+            >
+                <Terminal size={14} />
+                Debug Logs
+            </button>
+        );
+    }
+
+    return (
+        <div className="fixed bottom-4 right-4 w-[600px] h-[300px] bg-[#0A0A0A] border border-gray-800 rounded-lg shadow-2xl z-50 flex flex-col font-mono text-xs">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-[#111]">
+                <span className="text-gray-400 font-semibold flex items-center gap-2">
+                    <Terminal size={14} />
+                    System Logs
+                </span>
+                <div className="flex gap-2">
+                    <button onClick={() => setLogs([])} className="text-gray-500 hover:text-white">Clear</button>
+                    <button onClick={() => setIsOpen(false)} className="text-gray-500 hover:text-white"><X size={14} /></button>
+                </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+                {logs.length === 0 && <span className="text-gray-600 italic">No logs yet...</span>}
+                {logs.map((log, i) => (
+                    <div key={i} className="flex gap-2 border-b border-white/5 pb-0.5 mb-0.5">
+                        <span className="text-gray-600 shrink-0">[{log.time}]</span>
+                        <span className={
+                            log.level === 'error' ? 'text-red-400 font-bold' :
+                                log.level === 'warn' ? 'text-yellow-400' :
+                                    log.level === 'success' ? 'text-green-400' : 'text-blue-300'
+                        }>
+                            {log.level.toUpperCase()}
+                        </span>
+                        <span className="text-gray-300 break-all">{log.msg}</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+</file>
+
+<file path="src/components/Header.tsx">
+import { FolderOpen, Settings } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+interface HeaderProps {
+    onOpenFolder: () => void;
+    onOpenAdmin?: () => void;
+    onRetry?: () => void;
+    total: number;
+    processed: number; // Local processing done
+    analyzed: number;  // AI Analysis done
+    queueLength: number;
+    analyzingCount: number;
+    errorCount: number;
+    supportsFileSystemAccess?: boolean;
+}
+
+export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
+    const processingProgress = total > 0 ? (processed / total) * 100 : 0;
+    const analysisProgress = total > 0 ? (analyzed / total) * 100 : 0;
+
+    return (
+        <header className="h-16 px-6 border-b border-[#262626] bg-[#0F0F0F] flex items-center justify-between z-30 relative shadow-sm">
+            {/* Left: Logo */}
+            <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
+                    PR
+                </div>
+                <div>
+                    <h1 className="text-lg font-bold text-white tracking-tight leading-none">
+                        PhotoRank <span className="text-blue-500">AI</span>
+                    </h1>
+                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider bg-[#1A1A1A] px-1.5 py-0.5 rounded border border-[#262626]">v1.0 Pro</span>
+                </div>
+            </div>
+
+            {/* Middle: Dual Progress */}
+            {total > 0 && (
+                <div className="flex-1 max-w-xl mx-8 flex flex-col gap-2">
+                    {/* Bar 1: Local Processing */}
+                    <div className="flex items-center gap-3 text-xs">
+                        <span className="w-20 text-gray-400 text-right">Preprocessing</span>
+                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
+                            <motion.div
+                                className="h-full bg-blue-500"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${processingProgress}% ` }}
+                                transition={{ ease: "easeInOut" }}
+                            />
+                        </div>
+                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(processingProgress)}%</span>
+                    </div>
+
+                    {/* Bar 2: AI Analysis */}
+                    <div className="flex items-center gap-3 text-xs">
+                        <div className="w-20 flex justify-end">
+                            <span className="text-gray-400 text-right">AI Grading</span>
+                        </div>
+                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
+                            <motion.div
+                                className="h-full bg-purple-500"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${analysisProgress}% ` }}
+                                transition={{ ease: "easeInOut" }}
+                            />
+                        </div>
+                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(analysisProgress)}%</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Pipeline Stats (New) */}
+            {total > 0 && (
+                <div className="mr-6 flex items-center gap-4 text-xs font-mono text-gray-500 border-r border-[#262626] pr-6">
+                    <div className="flex flex-col items-end">
+                        <span className={queueLength > 0 ? "text-yellow-500" : "text-gray-600"}>Queue: {queueLength}</span>
+                        <span className={analyzingCount > 0 ? "text-purple-400 animate-pulse" : "text-gray-600"}>Analyzing: {analyzingCount}</span>
+                        {errorCount > 0 && (
+                            <button
+                                onClick={onRetry}
+                                className="text-red-400 hover:text-red-300 underline decoration-red-500/30 underline-offset-2 transition-colors mt-0.5"
+                            >
+                                Errors: {errorCount} (Retry?)
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Right: Actions */}
+            <div className="flex items-center gap-3">
+                <button
+                    onClick={onOpenAdmin}
+                    title="Admin Console (Alt+Shift+A)"
+                    className="p-2.5 bg-[#1A1A1A] text-gray-400 border border-[#262626] rounded-xl hover:text-white hover:bg-[#262626] transition-all active:scale-95"
+                >
+                    <Settings size={18} />
+                </button>
+                {supportsFileSystemAccess ? (
+                    <button
+                        onClick={onOpenFolder}
+                        className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-95 duration-100"
+                    >
+                        <FolderOpen size={16} />
+                        Import Folder
+                    </button>
+                ) : (
+                    <div className="text-xs text-gray-500 px-2">
+                        (Drag & Drop supported)
+                    </div>
+                )}
+            </div>
+        </header>
+    );
+}
+</file>
+
+<file path="src/components/ScoreBadge.tsx">
+import { Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { motion } from 'framer-motion';
+
+interface ScoreBadgeProps {
+    score?: number;
+    status: 'new' | 'processing' | 'done' | 'queued' | 'analyzing' | 'scored' | 'error';
+    className?: string;
+}
+
+export function ScoreBadge({ score, status, className }: ScoreBadgeProps) {
+    if (status === 'analyzing') {
+        return (
+            <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/20 backdrop-blur-md border border-blue-500/50", className)}>
+                <Loader2 size={12} className="text-blue-400 animate-spin" />
+                <span className="text-xs font-medium text-blue-200">Analyzing...</span>
+            </div>
+        );
+    }
+
+    if (status === 'processing') {
+        return (
+            <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-500/20 backdrop-blur-md border border-gray-500/50", className)}>
+                <Loader2 size={12} className="text-gray-400 animate-spin" />
+                <span className="text-xs font-medium text-gray-200">Preprocessing...</span>
+            </div>
+        );
+    }
+
+    if (status === 'queued') {
+        return (
+            <div className={cn("px-2.5 py-1 rounded-full bg-yellow-500/10 backdrop-blur-md border border-yellow-500/30", className)}>
+                <span className="text-xs font-medium text-yellow-500/80">In Queue</span>
+            </div>
+        );
+    }
+
+    if (status === 'error') {
+        return (
+            <div className={cn("flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/20 backdrop-blur-md border border-red-500/50", className)}>
+                <span className="text-xs font-bold text-red-500">FAILED</span>
+            </div>
+        );
+    }
+
+    if (status !== 'scored' || score === undefined) {
+        return (
+            <div className={cn("px-2.5 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/5", className)}>
+                <span className="text-xs font-medium text-gray-500">Waiting</span>
+            </div>
+        );
+    }
+
+    // Score Logic
+    let colorClass = "";
+    let glowClass = "";
+
+    if (score >= 9.0) {
+        colorClass = "text-[#4ADE80] border-[#4ADE80]/30 bg-[#4ADE80]/10";
+        glowClass = "shadow-[0_0_10px_rgba(74,222,128,0.2)]";
+    } else if (score >= 7.0) {
+        colorClass = "text-[#60A5FA] border-[#60A5FA]/30 bg-[#60A5FA]/10";
+        glowClass = "shadow-[0_0_10px_rgba(96,165,250,0.2)]";
+    } else if (score >= 5.0) {
+        colorClass = "text-[#FB923C] border-[#FB923C]/30 bg-[#FB923C]/10";
+        glowClass = "shadow-[0_0_10px_rgba(251,146,60,0.2)]";
+    } else {
+        colorClass = "text-[#F87171] border-[#F87171]/30 bg-[#F87171]/10";
+        glowClass = "shadow-[0_0_10px_rgba(248,113,113,0.2)]";
+    }
+
+    return (
+        <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className={cn(
+                "px-3 py-1 rounded-full backdrop-blur-md border flex items-center justify-center min-w-[3.5rem]",
+                colorClass,
+                glowClass,
+                className
+            )}
+        >
+            <span className="text-sm font-bold tracking-wide">{score.toFixed(1)}</span>
+        </motion.div>
+    );
+}
+</file>
+
+<file path="src/components/Toolbar.tsx">
+import { ArrowDownWideNarrow, Calendar, Filter } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+export type SortMode = 'date' | 'score';
+
+interface ToolbarProps {
+    sortMode: SortMode;
+    onSortChange: (mode: SortMode) => void;
+    minScore: number;
+    onMinScoreChange: (score: number) => void;
+}
+
+export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange }: ToolbarProps) {
+    return (
+        <div className="h-12 px-6 bg-[#0F0F0F] border-b border-[#262626] flex items-center justify-between z-20">
+            <div className="flex items-center gap-2">
+                <div className="flex bg-[#1A1A1A] p-1 rounded-lg border border-[#262626]">
+                    <button
+                        onClick={() => onSortChange('date')}
+                        className={cn(
+                            "px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all",
+                            sortMode === 'date' ? "bg-[#262626] text-white shadow-sm" : "text-gray-500 hover:text-gray-300"
+                        )}
+                    >
+                        <Calendar size={14} /> Date
+                    </button>
+                    <button
+                        onClick={() => onSortChange('score')}
+                        className={cn(
+                            "px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all",
+                            sortMode === 'score' ? "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-sm" : "text-gray-500 hover:text-gray-300"
+                        )}
+                    >
+                        <ArrowDownWideNarrow size={14} /> Score
+                    </button>
+                </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-[#1A1A1A] rounded-lg border border-[#262626]">
+                    <Filter size={14} className="text-gray-400" />
+                    <span className="text-xs text-gray-400 font-medium">Min Score:</span>
+                    <select
+                        value={minScore}
+                        onChange={(e) => onMinScoreChange(Number(e.target.value))}
+                        className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"
+                    >
+                        <option value={0}>All</option>
+                        <option value={5}>5.0+</option>
+                        <option value={7}>7.0+</option>
+                        <option value={8}>8.0+</option>
+                        <option value={9}>9.0+</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    );
+}
+</file>
+
+<file path="src/hooks/useResizeObserver.ts">
+import { useState, useEffect, useRef } from 'react';
+
+export function useResizeObserver<T extends HTMLElement>() {
+    const ref = useRef<T>(null);
+    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+    useEffect(() => {
+        const element = ref.current;
+        if (!element) return;
+
+        const observer = new ResizeObserver((entries) => {
+            if (!entries || entries.length === 0) return;
+            const entry = entries[0];
+            const { width, height } = entry.contentRect;
+            setDimensions({ width, height });
+        });
+
+        observer.observe(element);
+
+        return () => {
+            observer.disconnect();
+        };
+    }, []);
+
+    return { ref, width: dimensions.width, height: dimensions.height };
+}
+</file>
+
+<file path="src/lib/utils.ts">
+import { type ClassValue, clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+    return twMerge(clsx(inputs));
+}
+</file>
+
+<file path="src/App.css">
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+</file>
+
+<file path="src/gemini.test.ts">
+import { describe, it, expect, vi } from 'vitest';
+import { analyzePhotosBatch } from './lib/gemini';
+
+vi.mock('@google/generative-ai', () => ({
+    GoogleGenerativeAI: class {
+        constructor() { }
+        getGenerativeModel({ model }: { model: string }) {
+            return {
+                generateContent: vi.fn().mockImplementation(async () => {
+                    if (model === 'gemini-2.0-flash-exp') {
+                        throw new Error('404 Model Not Found');
+                    }
+                    if (model === 'gemini-1.5-flash') {
+                        return {
+                            response: {
+                                text: () => JSON.stringify({
+                                    results: [{ score: 9.9, reason: 'Fallback worked' }]
+                                })
+                            }
+                        };
+                    }
+                    throw new Error('Not reached: ' + model);
+                })
+            };
+        }
+    },
+    SchemaType: { OBJECT: 'OBJECT', NUMBER: 'NUMBER', STRING: 'STRING', ARRAY: 'ARRAY' }
+}));
+
+describe('Gemini Fallback Logic (Batch)', () => {
+    it('should fall back to next model if the first one returns 404', async () => {
+        const mockBlob = new Blob(['fake'], { type: 'image/jpeg' });
+        const results = await analyzePhotosBatch([{ id: 'test-1', blob: mockBlob }]);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].score).toBe(9.9);
+        expect(results[0].reason).toBe('Fallback worked');
+    });
+});
+</file>
+
+<file path="src/integration.test.tsx">
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+// Setup IndexedDB BEFORE importing db
+import 'fake-indexeddb/auto';
+
+// Force global assignment just in case
+if (!global.indexedDB) {
+    const { createRequire } = await import('module');
+    const require = createRequire(import.meta.url);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    global.indexedDB = require('fake-indexeddb');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    global.IDBKeyRange = require('fake-indexeddb/lib/IDBKeyRange');
+}
+
+import { db } from './lib/db';
+
+vi.mock('@google/generative-ai', () => {
+    return {
+        GoogleGenerativeAI: class {
+            constructor() { }
+            getGenerativeModel() {
+                return {
+                    generateContent: vi.fn().mockResolvedValue({
+                        response: {
+                            text: () => JSON.stringify({
+                                results: [
+                                    { score: 8.5, reason: "Good composition and lighting." }
+                                ]
+                            })
+                        }
+                    })
+                };
+            }
+        },
+        SchemaType: { OBJECT: 'OBJECT', NUMBER: 'NUMBER', STRING: 'STRING' }
+    };
+});
+
+// Mock Logger
+vi.mock('./lib/logger', () => ({
+    logger: {
+        info: vi.fn(),
+        success: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+    }
+}));
+
+// Mock Blob
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+global.Blob = class Blob {
+    size = 1024;
+    constructor() { }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+
+// Mock FileReader
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+global.FileReader = class FileReader {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onloadend: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onerror: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    result: any;
+    readAsDataURL() {
+        this.result = "data:image/jpeg;base64,mockbase64data";
+        this.onloadend();
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+
+
+describe('AI Pipeline Integration', () => {
+
+    beforeEach(async () => {
+        vi.resetModules(); // Reset module registry to reset 'hasRecovered' flag
+        await db.open();
+        await db.photos.clear();
+    });
+
+    afterEach(async () => {
+        vi.clearAllMocks();
+    });
+
+    it('should pick up a queued photo and analyze it', async () => {
+        // Dynamic import to allow hasRecovered reset
+        const { useAIPipeline } = await import('./hooks/useAIPipeline');
+
+        // 1. Seed DB with a queued photo
+        const photoId = 'test-photo-1';
+        await db.photos.add({
+            id: photoId,
+            name: 'test.jpg',
+            path: '/tmp/test.jpg',
+            size: 1000,
+            status: 'queued',
+            createdAt: Date.now(),
+            analysisBlob: new Blob(['fake-image-data']),
+        });
+
+        // 2. Render Hook
+        renderHook(() => useAIPipeline());
+
+        // 3. Wait for DB update
+        await waitFor(async () => {
+            const updated = await db.photos.get(photoId);
+            expect(updated?.status).toBe('scored');
+            expect(updated?.score).toBe(8.5);
+            expect(updated?.reason).toBe("Good composition and lighting.");
+        }, { timeout: 5000 });
+
+    });
+
+    it('should recover stuck analyzing tasks', async () => {
+        // Dynamic import
+        const { useAIPipeline } = await import('./hooks/useAIPipeline');
+
+        // 1. Seed DB with a stuck 'analyzing' photo
+        const photoId = 'stuck-photo-1';
+        await db.photos.add({
+            id: photoId,
+            name: 'stuck.jpg',
+            path: '/tmp/stuck.jpg',
+            size: 1000,
+            status: 'analyzing', // Stuck state
+            createdAt: Date.now(),
+            analysisBlob: new Blob(['fake-image-data']),
+        });
+
+        // 2. Render Hook (this mimics a page reload)
+        renderHook(() => useAIPipeline());
+
+        // 3. Expect it to be reset to 'queued' -> then picked up -> then 'scored'
+        await waitFor(async () => {
+            const updated = await db.photos.get(photoId);
+            expect(updated?.status).toBe('scored');
+        }, { timeout: 5000 });
+    });
+});
+</file>
+
+<file path="src/main.tsx">
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+</file>
+
+<file path=".check">
+// Placeholder for visual confirmation.
+// I will not actually write to file here, just reassuring myself.
+</file>
+
+<file path=".checker">
+// Dummy check
+</file>
+
+<file path="eslint.config.js">
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+import { defineConfig, globalIgnores } from 'eslint/config'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+      reactHooks.configs.flat.recommended,
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+  },
+])
+</file>
+
+<file path="index.html">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>auto_culling</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+</file>
+
+<file path="postcss.config.js">
+export default {
+    plugins: {
+        tailwindcss: {},
+        autoprefixer: {},
+    },
+}
+</file>
+
+<file path="tailwind.config.js">
+/** @type {import('tailwindcss').Config} */
+export default {
+    darkMode: 'class',
+    content: [
+        "./index.html",
+        "./src/**/*.{js,ts,jsx,tsx}",
+    ],
+    theme: {
+        extend: {},
+    },
+    plugins: [],
+}
+</file>
+
+<file path="tsconfig.app.json">
+{
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    /* Paths */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": [
+    "src"
+  ]
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.app.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ]
+    }
+  }
+}
+</file>
+
+<file path="tsconfig.node.json">
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["vite.config.ts"]
+}
+</file>
+
+<file path="src/components/PhotoCard.tsx">
+import { useEffect, useState, memo } from 'react';
+import { PhotoMetadata } from '@/lib/db';
+import { cn } from '@/lib/utils';
+import { Check } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { ScoreBadge } from './ScoreBadge';
+
+interface PhotoCardProps {
+    photo: PhotoMetadata;
+    style?: React.CSSProperties;
+    className?: string;
+    selected?: boolean;
+    onToggleSelect?: (id: string) => void;
+    onView?: (photo: PhotoMetadata) => void;
+}
+
+export const PhotoCard = memo(({ photo, style, className, selected, onToggleSelect, onView }: PhotoCardProps) => {
+    const [src, setSrc] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (photo.previewBlob) {
+            const url = URL.createObjectURL(photo.previewBlob);
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setSrc(url);
+            return () => URL.revokeObjectURL(url);
+        }
+    }, [photo.previewBlob]);
+
+    return (
+        <motion.div
+            layout
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.3 }}
+            style={style}
+            className={cn("relative group", className)}
+        >
+            <div
+                className={cn(
+                    "relative w-full aspect-square rounded-xl overflow-hidden bg-[#1A1A1A] border shadow-sm transition-all duration-300",
+                    selected ? "border-blue-500 ring-2 ring-blue-500/20" : "border-[#262626] group-hover:border-gray-600"
+                )}
+                onClick={() => onView?.(photo)}
+            >
+                {/* Image */}
+                {src ? (
+                    <img
+                        src={src}
+                        alt={photo.name}
+                        className={cn(
+                            "w-full h-full object-cover transition-transform duration-500",
+                            "group-hover:scale-105"
+                        )}
+                        loading="lazy"
+                    />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-700">
+                        <div className="w-8 h-8 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                    </div>
+                )}
+
+                {/* Overlays */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60" />
+
+                {/* Selection Checkbox */}
+                <div
+                    className={cn(
+                        "absolute top-3 left-3 z-10 transition-all duration-200",
+                        selected ? "opacity-100 scale-100" : "opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100"
+                    )}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleSelect?.(photo.id);
+                    }}
+                >
+                    <div className={cn(
+                        "w-6 h-6 rounded-md border flex items-center justify-center shadow-lg",
+                        selected ? "bg-blue-500 border-blue-500 text-white" : "bg-black/40 border-white/30 hover:bg-black/60 backdrop-blur-md"
+                    )}>
+                        {selected && <Check size={14} />}
+                    </div>
+                </div>
+
+                {/* Score Badge */}
+                <div className="absolute top-3 right-3 z-10">
+                    <ScoreBadge score={photo.score} status={photo.status} />
+                </div>
+
+                {/* Reason on Hover */}
+                {photo.reason && (
+                    <div className="absolute inset-x-0 bottom-0 p-3 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out bg-black/80 backdrop-blur-sm border-t border-white/10">
+                        <p className="text-[11px] leading-relaxed text-gray-300 font-medium line-clamp-2">
+                            "{photo.reason}"
+                        </p>
+                    </div>
+                )}
+            </div>
+        </motion.div>
+    );
+});
+</file>
+
+<file path="src/components/PhotoDetailModal.tsx">
+import { useEffect, useState } from 'react';
+import { PhotoMetadata } from '@/lib/db';
+import { X, Sparkles } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+interface PhotoDetailModalProps {
+    photo: PhotoMetadata;
+    onClose: () => void;
+}
+
+export function PhotoDetailModal({ photo, onClose }: PhotoDetailModalProps) {
+    const [src, setSrc] = useState<string | null>(null);
+
+    useEffect(() => {
+        let activeUrl = '';
+        let cancelled = false;
+
+        const loadContent = async () => {
+            try {
+                // 1. Try Analysis Blob (High Res Cache - fastest if available)
+                if (photo.analysisBlob) {
+                    activeUrl = URL.createObjectURL(photo.analysisBlob);
+                    if (!cancelled) setSrc(activeUrl);
+                    return;
+                }
+
+                // 2. Try Original File Object (RAM - fastest source)
+                if (photo.file) {
+                    activeUrl = URL.createObjectURL(photo.file);
+                    if (!cancelled) setSrc(activeUrl);
+                    return;
+                }
+
+                // 3. Try File System Handle (Disk - fast but async)
+                if (photo.handle) {
+                    try {
+                        const file = await photo.handle.getFile();
+                        activeUrl = URL.createObjectURL(file);
+                        if (!cancelled) setSrc(activeUrl);
+                        return;
+                    } catch (err) {
+                        console.warn("Failed to read from handle", err);
+                        // Fall through
+                    }
+                }
+
+                // 4. Fallback to Preview (Low Res Cache - always available)
+                if (photo.previewBlob) {
+                    activeUrl = URL.createObjectURL(photo.previewBlob);
+                    if (!cancelled) setSrc(activeUrl);
+                }
+            } catch (e) {
+                console.error("Failed to load image content", e);
+            }
+        };
+
+        setSrc(null); // Reset while loading
+        loadContent();
+
+        return () => {
+            cancelled = true;
+            if (activeUrl) URL.revokeObjectURL(activeUrl);
+        };
+    }, [photo]);
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-6" onClick={onClose}>
+            <div
+                className="bg-[#0F0F0F] rounded-2xl overflow-hidden max-w-6xl w-full h-[85vh] flex flex-col md:flex-row shadow-2xl border border-[#262626]"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Image Section */}
+                <div className="flex-1 bg-[#050505] flex items-center justify-center p-4 relative">
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent pointer-events-none" />
+                    {src ? (
+                        <img
+                            src={src}
+                            alt={photo.name}
+                            className="max-w-full max-h-full object-contain shadow-2xl rounded-lg"
+                        />
+                    ) : (
+                        <div className="text-gray-500 animate-pulse">Loading high-res image...</div>
+                    )}
+                </div>
+
+                {/* Info Section */}
+                <div className="w-full md:w-[400px] bg-[#0F0F0F] flex flex-col border-l border-[#262626]">
+                    {/* Header */}
+                    <div className="p-6 border-b border-[#262626] flex justify-between items-start bg-[#161616]">
+                        <div className="overflow-hidden">
+                            <h2 className="text-xl font-bold text-white truncate mb-1" title={photo.name}>{photo.name}</h2>
+                            <p className="text-xs text-gray-500 font-mono">{photo.status === 'scored' ? 'Analyzed' : 'Processing...'}</p>
+                        </div>
+                        <button
+                            onClick={onClose}
+                            className="p-2 hover:bg-[#262626] rounded-lg transition-colors text-gray-400 hover:text-white"
+                        >
+                            <X size={20} />
+                        </button>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
+                        {/* Score Card */}
+                        <div className="flex flex-col items-center justify-center p-8 rounded-2xl bg-[#1A1A1A] border border-[#262626] shadow-inner relative overflow-hidden group">
+                            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5 opacity-50" />
+
+                            {/* Giant Score */}
+                            <div className="relative z-10 flex flex-col items-center">
+                                <span className={cn(
+                                    "text-6xl font-black tracking-tighter mb-2 bg-clip-text text-transparent bg-gradient-to-br",
+                                    (photo.score || 0) >= 9 ? "from-green-400 to-emerald-600" :
+                                        (photo.score || 0) >= 7 ? "from-blue-400 to-indigo-600" :
+                                            (photo.score || 0) >= 5 ? "from-orange-400 to-red-600" : "from-red-400 to-red-700"
+                                )}>
+                                    {photo.score ? photo.score.toFixed(1) : 'N/A'}
+                                </span>
+                                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-semibold text-gray-400 uppercase tracking-widest">
+                                    <Sparkles size={12} className="text-blue-400" /> Aesthetic Score
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Analysis */}
+                        <div>
+                            <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                <span className="w-1 h-4 bg-purple-500 rounded-full" />
+                                Gemini Evaluation
+                            </h3>
+                            <div className="bg-[#1A1A1A] rounded-xl p-5 border border-[#262626] text-sm leading-relaxed text-gray-300 shadow-sm relative">
+                                {photo.reason ? (
+                                    <>
+                                        <p className="font-serif italic text-gray-400 mb-2 opacity-50 text-2xl absolute top-2 left-3">"</p>
+                                        <p className="relative z-10 px-2">{photo.reason}</p>
+                                        <p className="font-serif italic text-gray-400 mt-2 opacity-50 text-2xl absolute bottom-0 right-4">"</p>
+                                    </>
+                                ) : (
+                                    <span className="text-gray-600 italic">Analysis pending or unavailable.</span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="p-4 border-t border-[#262626] bg-[#161616]">
+                        <div className="flex justify-between items-center text-[10px] text-gray-600 font-mono uppercase">
+                            <span>ID: {photo.id.slice(0, 8)}...</span>
+                            <span>{(photo.size / 1024 / 1024).toFixed(2)} MB</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+</file>
+
+<file path="src/components/PhotoGrid.tsx">
+import { PhotoMetadata } from '@/lib/db';
+import { PhotoCard } from './PhotoCard';
+import { useEffect, forwardRef } from 'react';
+import { VirtuosoGrid } from 'react-virtuoso';
+
+interface PhotoGridProps {
+    photos: PhotoMetadata[];
+    selectedIds: Set<string>;
+    onToggleSelect: (id: string) => void;
+    onView: (photo: PhotoMetadata) => void;
+}
+
+export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView }: PhotoGridProps) {
+    useEffect(() => {
+        const scoredCount = photos.filter(p => p.status === 'scored').length;
+        console.log(`[UI] PhotoGrid Rendered. Total=${photos.length}, Scored=${scoredCount}`);
+    }, [photos]);
+
+    if (photos.length === 0) {
+        return (
+            <div className="w-full h-full flex flex-col items-center justify-center text-gray-500">
+                <p>No photos match the current filter.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="w-full h-full p-6">
+            <VirtuosoGrid
+                style={{ height: '100%' }}
+                totalCount={photos.length}
+                data={photos}
+                components={{
+                    List: forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ style, children, ...props }, ref) => (
+                        <div
+                            ref={ref}
+                            {...props}
+                            style={style}
+                            className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6 pb-20"
+                        >
+                            {children}
+                        </div>
+                    )),
+                    Item: (props) => (
+                        <div {...props} style={{ ...props.style, width: '100%', aspectRatio: '1/1' }} />
+                    )
+                }}
+                itemContent={(_, photo) => (
+                    <PhotoCard
+                        key={photo.id}
+                        photo={photo}
+                        style={{ width: '100%', height: '100%' }}
+                        selected={selectedIds.has(photo.id)}
+                        onToggleSelect={onToggleSelect}
+                        onView={onView}
+                    />
+                )}
+            />
+        </div>
+    );
+}
+</file>
+
+<file path="src/hooks/useAIPipeline.ts">
+import { useState, useRef, useEffect } from 'react';
+import { db } from '@/lib/db';
+import { analyzePhotosBatch } from '@/lib/gemini';
+import { logger } from '@/lib/logger';
+
+const BATCH_SIZE = 4;
+const RATE_LIMIT_DELAY_MS = 2000;
+const CONCURRENCY = 1; // 1 batch at a time
+
+let hasRecovered = false;
+
+export function useAIPipeline() {
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const mountedRef = useRef(true);
+    const lastAnalysisTimeRef = useRef<number>(0);
+
+
+    const recoverStuckTasks = async () => {
+        try {
+            if (!hasRecovered) {
+                hasRecovered = true;
+                const stuckTasks = await db.photos.where('status').equals('analyzing').toArray();
+                if (stuckTasks.length > 0) {
+                    logger.warn(`Recovering ${stuckTasks.length} legacy stuck tasks`);
+                    await db.transaction('rw', db.photos, async () => {
+                        for (const task of stuckTasks) {
+                            await db.photos.update(task.id, { status: 'queued', updatedAt: Date.now() });
+                        }
+                    });
+                }
+            }
+        } catch (e) {
+            console.error("Recovery failed", e);
+        }
+    };
+
+    // Expose for Debugging
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (window as any).debugPipeline = () => processQueue();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (window as any).db = db;
+        }
+    }, []);
+
+    useEffect(() => {
+        mountedRef.current = true; // <--- 重点：重新挂载时必须设为 true
+
+        // Listen for "Wake Up" calls
+        const wakeUp = () => {
+            console.log("Pipeline: 收到唤醒信号");
+            processQueue();
+        };
+        window.addEventListener('pipeline-wakeup', wakeUp);
+
+        // Start Loop
+        recoverStuckTasks();
+        processQueue();
+
+        return () => {
+            mountedRef.current = false;
+            window.removeEventListener('pipeline-wakeup', wakeUp);
+        };
+    }, []);
+
+    const processQueue = async () => {
+        // 加一行极致详细的日志，如果没看到这行，说明逻辑没进来
+        console.log(`[Pipeline Entry] Mounted: ${mountedRef.current}`);
+
+        if (!mountedRef.current) return;
+
+        try {
+            // 1. Watchdog: Auto-cleanup zombie tasks (status='analyzing' AND updatedAt > 30s ago)
+            const now = Date.now();
+            const expired = await db.photos
+                .where('status').equals('analyzing')
+                .filter(p => !p.updatedAt || (now - p.updatedAt > 30000))
+                .toArray();
+
+            if (expired.length > 0) {
+                logger.warn(`Pipeline: Watchdog cleaned up ${expired.length} stuck tasks`);
+                await db.transaction('rw', db.photos, async () => {
+                    for (const p of expired) {
+                        await db.photos.update(p.id, { status: 'queued', updatedAt: now });
+                    }
+                });
+            }
+
+            const activeCount = await db.photos.where('status').equals('analyzing').count();
+            const queuedCount = await db.photos.where('status').equals('queued').count();
+
+            // 只要有活儿没干完，或者正在干活，就打印状态
+            if (queuedCount > 0 || activeCount > 0) {
+                logger.info(`Pipeline Status: 等待中=${queuedCount}, 进行中=${activeCount}`);
+            }
+
+            if (queuedCount > 0 && activeCount < CONCURRENCY) {
+                const tasks = await db.photos.where('status').equals('queued').limit(BATCH_SIZE).toArray();
+                if (tasks.length > 0) {
+                    setIsAnalyzing(true);
+
+                    const taskIds = tasks.map(t => t.id);
+                    await db.transaction('rw', db.photos, async () => {
+                        for (const id of taskIds) {
+                            await db.photos.update(id, { status: 'analyzing', updatedAt: Date.now() });
+                        }
+                    });
+
+                    // Throttle: Ensure at least RATE_LIMIT_DELAY_MS has passed since last request start
+                    const now = Date.now();
+                    const timeSinceLast = now - lastAnalysisTimeRef.current;
+                    if (timeSinceLast < RATE_LIMIT_DELAY_MS) {
+                        const waitTime = RATE_LIMIT_DELAY_MS - timeSinceLast;
+                        logger.info(`Pipeline: Rate limiting... waiting ${waitTime}ms`);
+                        await new Promise(resolve => setTimeout(resolve, waitTime));
+                    }
+
+                    lastAnalysisTimeRef.current = Date.now();
+                    logger.info(`Pipeline: Starting batch analysis for ${tasks.length} photos: [${taskIds.join(', ')}]`);
+
+                    // Execute logic inline (awaiting it)
+                    // Execute logic inline (awaiting it)
+                    const items = tasks.map(t => ({ id: t.id, blob: t.analysisBlob })).filter((item): item is { id: string, blob: Blob } => !!item.blob);
+
+                    if (items.length !== tasks.length) throw new Error("Missing analysis data for some task");
+
+                    const results = await analyzePhotosBatch(items);
+                    logger.info("AI 返回结果数组:", results);
+
+                    // Create a Map for O(1) Lookup by ID
+                    const resultMap = new Map(results.map(r => [r.file_id, r]));
+
+                    if (results.length !== tasks.length) {
+                        logger.error(`Batch mismatch: Sent ${tasks.length}, Got ${results.length}. Handling individual items...`);
+                    }
+
+                    // Critical: Always save results even if component unmounted (Zombie process handling)
+                    await db.transaction('rw', db.photos, async () => {
+                        for (let i = 0; i < tasks.length; i++) {
+                            const task = tasks[i];
+                            const res = resultMap.get(task.id);
+
+                            if (res) {
+                                await db.photos.update(task.id, {
+                                    score: parseFloat(String(res.score)) || 0, // 强转为浮点数
+                                    reason: res.reason || "无理由",
+                                    status: 'scored',
+                                    analysisBlob: undefined, // Free up space!
+                                    updatedAt: Date.now()
+                                });
+                            } else {
+                                logger.warn(`Missing result for ID: ${task.id} - Re-queuing`);
+                                await db.photos.update(task.id, {
+                                    status: 'queued',
+                                    updatedAt: Date.now()
+                                });
+                            }
+                        }
+                    });
+                    logger.success(`Pipeline: Successfully scored batch of ${tasks.length}`);
+                    logger.info(`Pipeline: DB Update Verified. notifying UI...`);
+                }
+            }
+
+
+            // Sync analyzing status
+            setIsAnalyzing(activeCount > 0);
+
+        } catch (error) {
+            logger.error("Pipeline 运行异常", error);
+        } finally {
+            // 确保心跳永不停止
+            if (mountedRef.current) {
+                setTimeout(processQueue, 2000);
+            }
+        }
+    };
+
+
+
+    const queueAll = async () => {
+        const candidates = await db.photos.where('status').equals('done').toArray();
+        await db.transaction('rw', db.photos, async () => {
+            for (const p of candidates) {
+                await db.photos.update(p.id, { status: 'queued' });
+            }
+        });
+        window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
+    };
+
+    return { queueAll, isAnalyzing, processQueue };
+}
+</file>
+
+<file path="src/hooks/useDirectoryLoader.ts">
+import { useState, useCallback } from 'react';
+import { logger } from '@/lib/logger';
+
+export interface FileEntry {
+    id: string; // absolute path or unique identifier
+    handle?: FileSystemFileHandle;
+    file?: File;
+    name: string;
+    path: string; // relative path within the imported directory
+}
+
+export function useDirectoryLoader() {
+    const [isLoading, setIsLoading] = useState(false);
+    const [files, setFiles] = useState<FileEntry[]>([]);
+    const [error, setError] = useState<string | null>(null);
+
+    const [abortController, setAbortController] = useState<AbortController | null>(null);
+
+    const cancelLoad = useCallback(() => {
+        if (abortController) {
+            abortController.abort();
+            setAbortController(null);
+            setIsLoading(false);
+            logger.info('Operation cancelled by user');
+        }
+    }, [abortController]);
+
+    const loadDirectory = useCallback(async () => {
+        const controller = new AbortController();
+        setAbortController(controller);
+
+        logger.info('Opening directory picker...');
+        setIsLoading(true);
+        setError(null);
+        try {
+            const dirHandle = await window.showDirectoryPicker();
+            if (controller.signal.aborted) return;
+
+            const entries: FileEntry[] = [];
+            let skippedCount = 0;
+            async function scanDirectory(handle: FileSystemDirectoryHandle, pathPrefix: string) {
+                if (controller.signal.aborted) return;
+
+                for await (const entry of handle.values()) {
+                    if (controller.signal.aborted) return;
+
+                    const relativePath = pathPrefix ? `${pathPrefix}/${entry.name}` : entry.name;
+
+                    if (entry.kind === 'file') {
+                        const fileHandle = entry as FileSystemFileHandle;
+                        // Filter for images with extended format support (Added .dng)
+                        if (/\.(jpg|jpeg|png|webp|avif|dng)$/i.test(entry.name)) {
+                            entries.push({
+                                id: relativePath,
+                                handle: fileHandle,
+                                name: entry.name,
+                                path: relativePath
+                            });
+                        } else {
+                            skippedCount++;
+                        }
+                    } else if (entry.kind === 'directory') {
+                        await scanDirectory(entry as FileSystemDirectoryHandle, relativePath);
+                    }
+                }
+            }
+
+            await scanDirectory(dirHandle, "");
+            if (skippedCount > 0) {
+                logger.warn(`Skipped ${skippedCount} non-image or RAW files. Currently only JPG, PNG, WEBP, and DNG are supported.`);
+            }
+
+            if (controller.signal.aborted) return;
+
+            logger.success(`Scanned directory`, { count: entries.length });
+            setFiles(entries);
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if ((err as any)?.name !== 'AbortError' && !controller.signal.aborted) {
+                setError(errorMessage || 'Failed to load directory');
+                logger.error(`Directory scan failed`, { error: errorMessage });
+            } else {
+                logger.info('Directory scan aborted');
+            }
+        } finally {
+            // Only turn off loading if we haven't already cancelled (which does it immediately)
+            if (!controller.signal.aborted) {
+                setIsLoading(false);
+                setAbortController(null);
+            }
+        }
+    }, []);
+
+    const loadFiles = useCallback(async (fileList: File[]) => {
+        logger.info('Processing dropped files...', { count: fileList.length });
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            const originalCount = fileList.length;
+            const validFiles = fileList.filter(f => /\.(jpg|jpeg|png|webp|avif|dng)$/i.test(f.name));
+            const skipped = originalCount - validFiles.length;
+
+            const entries: FileEntry[] = validFiles.map(f => ({
+                id: `drop-${Date.now()}-${f.name}`,
+                file: f,
+                name: f.name,
+                path: f.name
+            }));
+
+            if (skipped > 0) {
+                logger.warn(`Skipped ${skipped} files. Only JPG, PNG, WEBP, and DNG are currently supported.`);
+            }
+
+            if (entries.length === 0) {
+                throw new Error("No supported image files found. Please use JPG, PNG, WEBP, or DNG.");
+            }
+
+            logger.success(`Processed dropped files`, { count: entries.length });
+            setFiles(entries); // Replace files
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            setError(errorMessage || 'Failed to process files');
+            logger.error(`File drop failed`, { error: errorMessage });
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    const supportsFileSystemAccess = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+    return { loadDirectory, loadFiles, cancelLoad, isLoading, files, error, supportsFileSystemAccess };
+}
+</file>
+
+<file path="src/lib/db.ts">
+import Dexie, { type Table } from 'dexie';
+
+export interface PhotoMetadata {
+    id: string; // Unique path
+    name: string;
+    path: string; // Relative path
+    size: number;
+    handle?: FileSystemFileHandle;
+
+    // Generated Content
+    previewBlob?: Blob;
+    analysisBlob?: Blob; // 1024px version
+
+    // AI Results
+    score?: number;
+    reason?: string;
+
+    file?: File; // Store direct File object for dropped files (supported by IndexedDB)
+    // Meta
+    status: 'new' | 'processing' | 'done' | 'queued' | 'analyzing' | 'scored' | 'error';
+    width?: number;
+    height?: number;
+    createdAt: number;
+    updatedAt?: number;
+}
+
+export interface LogEntry {
+    id?: number;
+    timestamp: number;
+    level: 'info' | 'warn' | 'error';
+    message: string;
+    details?: unknown;
+}
+
+export class PhotoRankDB extends Dexie {
+    photos!: Table<PhotoMetadata>;
+    logs!: Table<LogEntry>;
+
+    constructor() {
+        super('PhotoRankDB');
+        // 强行提到 25（必须比你之前看到的 21 大）
+        this.version(25).stores({
+            photos: 'id, status, score, createdAt',
+            logs: '++id, timestamp, level'
+        });
+    }
+}
+
+export const db = new PhotoRankDB();
+</file>
+
+<file path="src/lib/gemini.ts">
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { logger } from "./logger";
+
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+
+let genAI: GoogleGenerativeAI | null = null;
+
+function getGenAI() {
+    if (!genAI) {
+        if (!API_KEY) throw new Error("VITE_GEMINI_API_KEY is not defined in your environment variables (.env file).");
+        genAI = new GoogleGenerativeAI(API_KEY);
+    }
+    return genAI;
+}
+
+const resultSchema = {
+    type: SchemaType.OBJECT,
+    properties: {
+        file_id: {
+            type: SchemaType.STRING,
+            description: "The unique ID of the photo as provided in the prompt",
+            nullable: false,
+        },
+        score: {
+            type: SchemaType.NUMBER,
+            description: "Aesthetic score from 1.0 to 10.0",
+            nullable: false,
+        },
+        reason: {
+            type: SchemaType.STRING,
+            description: "Concise reason for the score (max 15 words). Focus on composition, lighting, and sharpness.",
+            nullable: false,
+        },
+    },
+    required: ["file_id", "score", "reason"],
+};
+
+const batchSchema = {
+    description: "A list of aesthetic scores and reasons for multiple photos",
+    type: SchemaType.OBJECT,
+    properties: {
+        results: {
+            type: SchemaType.ARRAY,
+            items: resultSchema,
+            description: "Scores and reasons for each photo, including their IDs"
+        }
+    },
+    required: ["results"],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+
+
+const MODELS = [
+    "gemini-3-flash-preview", // User requested newest model
+    "gemini-2.0-flash",     // Stable fast model
+    "gemini-2.5-flash",     // Newer fast model
+    "gemini-2.0-flash-exp", // Experimental
+    "gemini-2.5-pro",       // High quality fallback
+];
+
+async function tryGenerate(modelName: string, items: { id: string, data: string, mimeType: string }[], signal?: AbortSignal) {
+    if (signal?.aborted) throw new Error("Aborted before generation");
+
+    const model = getGenAI().getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: batchSchema,
+        },
+        // Note: The SDK might not fully support AbortSignal in all environments yet, 
+        // but checking it explicitly helps save resources if already cancelled.
+    });
+
+    const promptMessages = [
+        `Analyze the aesthetic quality of these ${items.length} photos for a professional photographer. 
+         The photos correspond to the following IDs in order: ${JSON.stringify(items.map(i => i.id))}.
+         Return a JSON object with a "results" array containing the 'file_id', 'score', and 'reason' for each photo. 
+         IMPORTANT: You must include the correct 'file_id' provided for each result.
+         Strictly follow the JSON schema.`,
+        ...items.map(item => ({ inlineData: { data: item.data, mimeType: item.mimeType } }))
+    ];
+
+    logger.info(`Sending request to ${modelName} with ${items.length} images...`);
+
+    if (signal?.aborted) throw new Error("Aborted");
+
+    const start = Date.now();
+
+    // We can't cancel the HTTP request easily with this SDK version, 
+    // but we can reject early if the signal fires during the await.
+    const result = await Promise.race([
+        model.generateContent(promptMessages),
+        new Promise<never>((_, reject) => {
+            if (signal) {
+                signal.addEventListener("abort", () => reject(new Error("Request Aborted")));
+            }
+        })
+    ]);
+
+    logger.info(`Received response from ${modelName} in ${Date.now() - start}ms`);
+    return result;
+}
+
+export async function analyzePhotosBatch(items: { id: string, blob: Blob }[], signal?: AbortSignal): Promise<{ file_id: string; score: number; reason: string }[]> {
+    return Promise.race([
+        analyzeInternalBatch(items, signal),
+        new Promise<never>((_, reject) => {
+            const timer = setTimeout(() => reject(new Error("Global analysis timeout (60s)")), 60000);
+            if (signal) {
+                signal.addEventListener("abort", () => {
+                    clearTimeout(timer);
+                    reject(new Error("Analysis Aborted"));
+                });
+            }
+        })
+    ]);
+}
+
+async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?: AbortSignal): Promise<{ file_id: string; score: number; reason: string }[]> {
+    if (!API_KEY) throw new Error("API Key not found");
+    if (signal?.aborted) throw new Error("Aborted");
+
+    const images = await Promise.all(items.map(async item => ({
+        id: item.id,
+        data: await blobToBase64(item.blob),
+        mimeType: "image/jpeg"
+    })));
+
+    let lastError;
+
+    for (const modelName of MODELS) {
+        if (signal?.aborted) throw new Error("Aborted");
+
+        try {
+            logger.info(`Attempting analysis with model: ${modelName}`);
+            const result = await tryGenerate(modelName, images, signal);
+
+            logger.info(`Raw response received. Extracting text...`);
+            const text = result.response.text();
+            logger.info(`Gemini Raw Output (First 200 chars): ${text.substring(0, 200)}...`);
+
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+                console.log("AI 原始响应对象:", parsed); // 核心调试：看看 AI 到底返回了什么结构
+            } catch (e) {
+                logger.error(`JSON Parse Error: ${e}`);
+                throw new Error(`Invalid JSON response: ${text.substring(0, 100)}...`);
+            }
+
+            if (!parsed.results || !Array.isArray(parsed.results)) {
+                logger.error(`Invalid structure: results is missing or not an array`);
+                throw new Error("Invalid batch response structure");
+            }
+
+            // Optional: Verify IDs exist? Or just leave it to the caller to match.
+            // Let's at least check length roughly matches or is non-empty.
+            if (parsed.results.length === 0 && items.length > 0) {
+                throw new Error("AI returned empty results array");
+            }
+
+            return parsed.results;
+        } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            lastError = error;
+
+            // Check for Rate Limit (429) - Retry logic could be added here, 
+            // but for now we fallback to next model or wait.
+            // If it's a 429, we should probably wait a bit longer before trying next model.
+            if (error.message.includes("429") || error.message.includes("Too Many Requests")) {
+                logger.warn(`Rate limit hit on ${modelName}, waiting 2s...`);
+                await new Promise(r => setTimeout(r, 2000));
+            } else {
+                logger.warn(`Model ${modelName} failed: ${error.message}`);
+                // Use a smaller delay for other errors
+                await new Promise(r => setTimeout(r, 500));
+            }
+            continue;
+        }
+    }
+
+    throw new Error(`AI Batch Analysis Failed (All Models): ${lastError?.message || "Unknown"}`);
+}
+
+
+function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const dataUrl = reader.result as string;
+            const base64 = dataUrl.split(',')[1];
+            resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+export async function testGeminiConnection(): Promise<string> {
+    try {
+        if (!API_KEY) throw new Error("API Key is missing");
+
+        // Step 1: Try to list models to see what we have access to
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(`ListModels failed: ${data.error?.message || response.statusText}`);
+        }
+
+        const models = (data.models || []).map((m: any) => m.name.replace('models/', ''));
+        logger.info("Available Models:", models);
+
+        // Step 2: Check if our target models exist
+        const hasFlash3 = models.includes('gemini-3-flash-preview');
+        const hasFlash2 = models.includes('gemini-2.0-flash');
+        const hasFlash20Exp = models.includes('gemini-2.0-flash-exp');
+        const hasFlash25 = models.includes('gemini-2.5-flash');
+
+        if (!hasFlash3 && !hasFlash2 && !hasFlash25 && !hasFlash20Exp) {
+            return `Connected, but missing expected models. Available: ${models.slice(0, 5).join(', ')}...`;
+        }
+
+        // Step 3: Try a real generation with an existing model
+        const targetModel = hasFlash3 ? 'gemini-3-flash-preview' : (hasFlash2 ? 'gemini-2.0-flash' : (hasFlash25 ? 'gemini-2.5-flash' : models[0]));
+        const model = getGenAI().getGenerativeModel({ model: targetModel });
+        const result = await model.generateContent("Hello, reply 'Yes'.");
+
+        return `Success! (Using ${targetModel}). Response: ${result.response.text()}`;
+
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logger.error("Gemini Connection Test Failed", msg);
+        throw new Error(msg);
+    }
+}
+</file>
+
+<file path="src/lib/logger.ts">
+// Imports removed as unused
+export enum LogLevel {
+    INFO = 'info',
+    WARN = 'warn',
+    ERROR = 'error',
+    SUCCESS = 'success'
+}
+
+export interface LogEntry {
+    id?: number;
+    timestamp: number;
+    level: LogLevel;
+    message: string;
+    details?: unknown;
+}
+
+class LoggerService {
+    async log(level: LogLevel, message: string, details?: unknown) {
+        // const entry: LogEntry = {
+        //     timestamp: Date.now(),
+        //     level,
+        //     message,
+        //     details
+        // };
+
+        // Emit Custom Event for UI
+        if (typeof window !== 'undefined') {
+            const event = new CustomEvent('app-log', {
+                detail: {
+                    time: new Date().toLocaleTimeString(),
+                    level,
+                    msg: message + (details ? ' ' + JSON.stringify(details) : '')
+                }
+            });
+            window.dispatchEvent(event);
+        }
+
+        // Log to console for dev (Silenced for Production Cleanliness)
+        const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
+        console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
+
+        // Persist to DB (Simulated/Optional for now to prevent schema errors if not updated)
+        try {
+            // await db.table('logs').add(entry);
+        } catch (e) {
+            console.error("Failed to write log", e);
+        }
+    }
+
+    info(message: string, details?: unknown) { this.log(LogLevel.INFO, message, details); }
+    success(message: string, details?: unknown) { this.log(LogLevel.SUCCESS, message, details); }
+    warn(message: string, details?: unknown) { this.log(LogLevel.WARN, message, details); }
+    error(message: string, details?: unknown) { this.log(LogLevel.ERROR, message, details); }
+}
+
+export const logger = new LoggerService();
+</file>
+
+<file path="src/workers/imageProcessor.worker.ts">
+/// <reference lib="webworker" />
+
+self.onmessage = async (e: MessageEvent) => {
+    const { id, file } = e.data;
+
+    try {
+        const bitmap = await createImageBitmap(file);
+
+        console.log(`[Worker] Processing ${id}: Start Compression...`);
+
+        // 1. Generate Thumbnail (300px)
+        const thumbBlob = await resizeImage(bitmap, 300);
+
+        // 2. Generate Analysis (1024px)
+        const analysisBlob = await resizeImage(bitmap, 1024);
+
+        console.log(`[Worker] Processing ${id}: Compression Complete. Thumb=${thumbBlob?.size}, Analysis=${analysisBlob?.size}`);
+
+        self.postMessage({
+            id,
+            status: 'success',
+            thumbBlob,
+            analysisBlob
+        });
+
+        bitmap.close();
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        self.postMessage({ id, status: 'error', error: message });
+    }
+};
+
+async function resizeImage(bitmap: ImageBitmap, targetSize: number): Promise<Blob | null> {
+    const scale = Math.min(targetSize / bitmap.width, targetSize / bitmap.height, 1);
+    // If no scaling needed and original is wanted, return original? 
+    // No, we always want consistent formats (e.g. jpeg/webp). 
+    // If scale is 1, we still draw it.
+
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) throw new Error("Could not get canvas context");
+
+    // High quality resize
+    ctx.drawImage(bitmap, 0, 0, width, height);
+
+    return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+}
+
+export { };
+</file>
+
+<file path="src/App.tsx">
+import { useState, useEffect, useRef } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db, PhotoMetadata } from '@/lib/db';
+import { useDirectoryLoader } from '@/hooks/useDirectoryLoader';
+import { useAIPipeline } from '@/hooks/useAIPipeline';
+import { PhotoGrid } from '@/components/PhotoGrid';
+import { Header } from '@/components/Header';
+import { Toolbar } from '@/components/Toolbar';
+import { PhotoDetailModal } from '@/components/PhotoDetailModal';
+import { Toaster, toast } from 'sonner';
+import { DebugConsole } from './components/DebugConsole';
+import { Upload } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { logger } from '@/lib/logger';
+import { AdminDashboard } from './components/AdminDashboard';
+
+// Type for Stats
+// Pipeline statistics interface removed (now literal)
+
+function App() {
+  const { loadDirectory, loadFiles, files, isLoading: isScanning, supportsFileSystemAccess } = useDirectoryLoader();
+  useAIPipeline(); // Start Pipeline silently
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sortMode, setSortMode] = useState<'date' | 'score'>('date');
+  const [minScore, setMinScore] = useState<number>(0);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [viewingPhoto, setViewingPhoto] = useState<PhotoMetadata | null>(null);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+
+  // Keyboard shortcut for Admin
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Use Alt+Shift+A for Admin
+      if (e.altKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+        setIsAdminOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Detailed Pipeline Stats
+  const stats = useLiveQuery(async () => {
+    const counts = {
+      new: await db.photos.where('status').equals('new').count(),
+      processing: await db.photos.where('status').equals('processing').count(),
+      done: await db.photos.where('status').equals('done').count(),
+      queued: await db.photos.where('status').equals('queued').count(),
+      analyzing: await db.photos.where('status').equals('analyzing').count(),
+      scored: await db.photos.where('status').equals('scored').count(),
+      error: await db.photos.where('status').equals('error').count(),
+      total: await db.photos.count(),
+    };
+    return counts;
+  }, []) || { new: 0, processing: 0, done: 0, queued: 0, analyzing: 0, scored: 0, error: 0, total: 0 };
+
+  /* Main Photos Query - Fixed to include everything even when sorting */
+  const photos = useLiveQuery(async () => {
+    let result = await db.photos.toArray();
+
+    // 修改排序逻辑：强制转为 Number，防止字符串数据导致排序失效
+    result.sort((a, b) => {
+      if (sortMode === 'score') {
+        // 1. 强制转为数字，如果无效则设为 -1 (排在最后)
+        const valA = (a.score !== undefined && a.score !== null) ? Number(a.score) : -1;
+        const valB = (b.score !== undefined && b.score !== null) ? Number(b.score) : -1;
+
+        // 2. 如果是 NaN (转换失败)，也当做 -1
+        const safeA = isNaN(valA) ? -1 : valA;
+        const safeB = isNaN(valB) ? -1 : valB;
+
+        // 3. 执行降序排序 (大 -> 小)
+        return safeB - safeA;
+      }
+
+      // 默认按时间倒序
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+
+    if (minScore > 0) {
+      result = result.filter(p => (Number(p.score) || 0) >= minScore);
+    }
+    return result;
+  }, [sortMode, minScore]) || [];
+
+  const hasPhotos = stats.total > 0;
+  const isComplete = hasPhotos && stats.scored === stats.total && !isScanning;
+  const processedCount = stats.total - stats.new - stats.processing;
+
+  // Auto-switch to Score sort when complete
+  useEffect(() => {
+    if (isComplete && sortMode !== 'score') {
+      toast("All analysis complete!", { description: "Switching to score view for best results." });
+      setSortMode('score');
+    }
+  }, [isComplete]);
+
+  // Image Processor Worker
+  const workerRef = useRef<Worker | null>(null);
+  useEffect(() => {
+    workerRef.current = new Worker(new URL('./workers/imageProcessor.worker.ts', import.meta.url), { type: 'module' });
+    workerRef.current.onmessage = async (e) => {
+      const { id, status, thumbBlob, analysisBlob } = e.data;
+      if (status === 'success') {
+        await db.photos.update(id, {
+          status: 'done',
+          previewBlob: thumbBlob,
+          analysisBlob: analysisBlob
+        });
+      } else {
+        await db.photos.update(id, { status: 'error' });
+      }
+    };
+    return () => { workerRef.current?.terminate(); };
+  }, []);
+
+  // Sync Files to DB
+  useEffect(() => {
+    if (files.length > 0) {
+      toast.success(`Identified ${files.length} photos`, {
+        description: "Starting local preprocessing..."
+      });
+      // Auto-mode is implicit now
+      const newPhotos: PhotoMetadata[] = files.map(f => ({
+        id: f.id,
+        name: f.name,
+        path: f.path,
+        size: f.file ? f.file.size : 0,
+        handle: f.handle,
+        file: f.file,
+        status: 'new',
+        createdAt: Date.now()
+      }));
+
+      db.transaction('rw', db.photos, async () => {
+        await db.photos.clear(); // Clear old for new import? Or append? Usually clear for this type of app.
+        await db.photos.bulkPut(newPhotos);
+      });
+    }
+  }, [files]);
+
+  // Process Loop
+  useEffect(() => {
+    const processNext = async () => {
+      // Find one 'new' photo
+      const nextPhoto = await db.photos.where('status').equals('new').first();
+      if (nextPhoto && workerRef.current) {
+        await db.photos.update(nextPhoto.id, { status: 'processing' });
+        try {
+          let file: File;
+          if (nextPhoto.file) {
+            file = nextPhoto.file;
+          } else if (nextPhoto.handle) {
+            file = await (nextPhoto.handle as FileSystemFileHandle).getFile();
+          } else {
+            throw new Error("No file or handle available");
+          }
+          workerRef.current.postMessage({ id: nextPhoto.id, file });
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          logger.error("Failed to get file", { id: nextPhoto.id, msg });
+          await db.photos.update(nextPhoto.id, { status: 'error' });
+        }
+      }
+    };
+    // We trigger this whenever photos change (crudely), simpler than a dedicated loop with 'processing' check
+    const hasNew = photos.some(p => p.status === 'new');
+    if (hasNew) processNext();
+  }, [photos]);
+
+  // Auto-Queue logic - Now independent of the 'photos' grid array
+  useEffect(() => {
+    if (stats.done > 0) {
+      const runAutoQueue = async () => {
+        const doneList = await db.photos.where('status').equals('done').toArray();
+        if (doneList.length > 0) {
+          logger.info(`Auto-queuing ${doneList.length} photos`);
+          await db.transaction('rw', db.photos, async () => {
+            for (const p of doneList) {
+              await db.photos.update(p.id, { status: 'queued' });
+            }
+          });
+          window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
+        }
+      };
+      runAutoQueue();
+    }
+  }, [stats.done]);
+
+  // Trigger pipeline check if conditions are met
+  useEffect(() => {
+    // Assuming loadQueue is a state or derived value indicating if files are currently being loaded
+    // For this context, we'll assume it's always empty if not explicitly loading, or you might need to define it.
+    // For now, let's assume `files.length === 0` implies no active loading from `useDirectoryLoader`
+    const loadQueueLength = files.length; // Or a more specific state if available
+
+    if (stats.done > 0 && stats.total > stats.done && loadQueueLength === 0) {
+      // If we have photos, and not everything is done, and not currently loading specific files...
+      // Trigger pipeline check if not running
+      window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
+    }
+  }, [stats.done, stats.total, files.length]);
+
+
+  // Drag Handlers
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragOver(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragOver(false); };
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+
+    const items = e.dataTransfer.items;
+    if (!items) return;
+
+    const files: File[] = [];
+
+    async function traverse(item: FileSystemEntry) {
+      if (item.isFile) {
+        const fileEntry = item as FileSystemFileEntry;
+        const file = await new Promise<File>(res => fileEntry.file(res));
+        files.push(file);
+      } else if (item.isDirectory) {
+        const dirEntry = item as FileSystemDirectoryEntry;
+        const reader = dirEntry.createReader();
+        const entries = await new Promise<FileSystemEntry[]>(res => reader.readEntries(res));
+        for (const entry of entries) {
+          await traverse(entry);
+        }
+      }
+    }
+
+    const promises = [];
+    for (const item of items) {
+      const entry = item.webkitGetAsEntry();
+      if (entry) promises.push(traverse(entry));
+    }
+
+    await Promise.all(promises);
+    if (files.length > 0) {
+      await loadFiles(files);
+    } else {
+      logger.warn("Drop event contained no valid files or folders");
+    }
+  };
+
+  const handleToggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const handleRetryErrors = async () => {
+    logger.info("Retrying all failed analyses...");
+    await db.transaction('rw', db.photos, async () => {
+      const errorPhotos = await db.photos.where('status').equals('error').toArray();
+      for (const p of errorPhotos) {
+        await db.photos.update(p.id, { status: 'queued' });
+      }
+    });
+  };
+
+  const isApiKeyMissing = !import.meta.env.VITE_GEMINI_API_KEY;
+
+  return (
+    <div className="flex flex-col h-screen bg-[#0F0F0F] text-white overflow-hidden font-sans selection:bg-blue-500/30">
+      <Toaster position="bottom-right" theme="dark" />
+      <DebugConsole />
+
+      {/* API Key Warning */}
+      {isApiKeyMissing && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 bg-red-500/90 backdrop-blur-md text-white px-4 py-2 rounded-full border border-red-400/50 shadow-2xl flex items-center gap-2 animate-bounce">
+          <span className="text-xs font-bold ring-1 ring-white/50 rounded-full px-1.5">!</span>
+          <span className="text-xs font-medium">VITE_GEMINI_API_KEY is missing in your .env file</span>
+        </div>
+      )}
+
+      {/* Header */}
+      <Header
+        onOpenFolder={loadDirectory}
+        onOpenAdmin={() => setIsAdminOpen(true)}
+        onRetry={handleRetryErrors}
+        total={stats.total}
+        processed={processedCount}
+        analyzed={stats.scored}
+        queueLength={stats.queued}
+        analyzingCount={stats.analyzing}
+        errorCount={stats.error}
+        supportsFileSystemAccess={supportsFileSystemAccess}
+      />
+
+      {/* Toolbar */}
+      <Toolbar
+        sortMode={sortMode}
+        onSortChange={setSortMode}
+        minScore={minScore}
+        onMinScoreChange={setMinScore}
+      />
+
+      {/* Main Area */}
+      <div className="flex-1 relative overflow-hidden">
+        {!hasPhotos ? (
+          // Empty State
+          <div
+            className={cn(
+              "absolute inset-0 m-8 rounded-3xl border-2 border-dashed flex flex-col items-center justify-center transition-all duration-200",
+              isDragOver ? "border-blue-500 bg-blue-500/5 scale-[0.99]" : "border-[#262626] bg-[#161616]"
+            )}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <div className="w-20 h-20 rounded-full bg-[#1A1A1A] flex items-center justify-center mb-6 shadow-2xl border border-[#262626]">
+              <Upload className={cn("transition-colors duration-300", isDragOver ? "text-blue-500" : "text-gray-500")} size={32} />
+            </div>
+            <h2 className="text-2xl font-bold mb-3 text-white">Drop Folder Here</h2>
+            <p className="text-gray-500 text-sm max-w-sm text-center mb-8 leading-relaxed">
+              Drag and drop your photos folder to start. AI will automatically analyze specific criteria locally and score aesthetics in the cloud.
+            </p>
+            <button
+              onClick={() => document.getElementById('target-file-input')?.click()}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-blue-600/20 hover:scale-105 transition-all"
+            >
+              Browse Files
+            </button>
+            <input
+              id="target-file-input"
+              type="file"
+              multiple
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) loadFiles(Array.from(e.target.files));
+              }}
+            />
+          </div>
+        ) : (
+          // Grid
+          <PhotoGrid
+            photos={photos}
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleSelect}
+            onView={setViewingPhoto}
+          />
+        )}
+      </div>
+
+      {/* Detail Modal */}
+      {viewingPhoto && (
+        <PhotoDetailModal
+          photo={viewingPhoto}
+          onClose={() => setViewingPhoto(null)}
+        />
+      )}
+
+      {/* Admin Dashboard Overlay */}
+      {isAdminOpen && (
+        <AdminDashboard
+          onClose={() => setIsAdminOpen(false)}
+          onRetry={handleRetryErrors}
+        />
+      )}
+    </div>
+  );
+}
+
+export default App;
+</file>
+
+<file path="src/index.css">
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+  /* Force dark mode preference */
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #0f0f0f;
+  /* Deep dark background for Photo App */
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #0f0f0f;
+  color: #fff;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}
+</file>
+
+<file path="src/vite-env.d.ts">
+/// <reference types="vite/client" />
+
+interface Window {
+    showDirectoryPicker(): Promise<FileSystemDirectoryHandle>;
+}
+
+interface FileSystemHandle {
+    kind: 'file' | 'directory';
+    name: string;
+}
+
+interface FileSystemFileHandle extends FileSystemHandle {
+    kind: 'file';
+    getFile(): Promise<File>;
+}
+
+interface FileSystemDirectoryHandle extends FileSystemHandle {
+    kind: 'directory';
+    values(): AsyncIterableIterator<FileSystemHandle>;
+}
+
+// Drag and Drop (Webkit) API types
+interface FileSystemEntry {
+    isFile: boolean;
+    isDirectory: boolean;
+    name: string;
+    fullPath: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    filesystem: any;
+}
+
+interface FileSystemFileEntry extends FileSystemEntry {
+    isFile: true;
+    isDirectory: false;
+    file(successCallback: (file: File) => void, errorCallback?: (error: DOMException) => void): void;
+}
+
+interface FileSystemDirectoryEntry extends FileSystemEntry {
+    isFile: false;
+    isDirectory: true;
+    createReader(): FileSystemDirectoryReader;
+}
+
+interface FileSystemDirectoryReader {
+    readEntries(successCallback: (entries: FileSystemEntry[]) => void, errorCallback?: (error: DOMException) => void): void;
+}
+
+interface DataTransferItem {
+    webkitGetAsEntry(): FileSystemEntry | null;
+}
+</file>
+
+<file path=".gitignore">
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Production / Build
+dist
+build
+
+# Environment Variables (CRITICAL!)
+.env
+.env.local
+.env.*.local
+
+# Debug logs & Temp files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.node_modules/.tmp
+tsconfig.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+</file>
+
+<file path="package.json">
+{
+  "name": "auto_culling",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "clsx": "^2.1.1",
+    "dexie": "^4.2.1",
+    "dexie-react-hooks": "^4.2.0",
+    "framer-motion": "^12.23.26",
+    "lucide-react": "^0.562.0",
+    "motion": "^12.23.26",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-virtuoso": "^4.18.0",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@testing-library/react": "^16.3.1",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "autoprefixer": "^10.4.23",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "fake-indexeddb": "^6.2.5",
+    "globals": "^16.5.0",
+    "happy-dom": "^20.0.11",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vite": "^7.2.4",
+    "vitest": "^4.0.16"
+  }
+}
+</file>
+
+<file path="README.md">
+# PhotoRank AI 📸
+
+**AI-Powered Professional Photo Culling & Aesthetic Scoring Tool**
+
+PhotoRank AI is a high-performance web application designed for photographers to automate the tedious process of selecting the best shots from thousands of images.
+
+### ✨ Key Features
+- **Privacy-First**: All image compression and processing happen locally in your browser via Web Workers and IndexedDB.
+- **AI Aesthetic Scoring**: Uses Google Gemini Pro Vision to provide multi-dimensional scoring (composition, lighting, technical quality).
+- **Industrial Performance**: Handles large batches of high-res photos without freezing the UI.
+- **Offline Persistent**: Your ratings and progress are saved locally in the browser.
+
+### 🛠️ Tech Stack
+- **Framework**: React 19 + Vite 7 (Latest)
+- **Intelligence**: Google Gemini API
+- **Storage**: Dexie.js (IndexedDB)
+- **Animation**: Framer Motion
+- **Styling**: Tailwind CSS
+
+### 🚀 Getting Started
+1. **Clone the repo**: `git clone https://github.com/Shadyupup/PhotoRank-AI.git`
+2. **Install**: `npm install`
+3. **Set up API Key**: Create a `.env` file and add `VITE_GEMINI_API_KEY=your_key_here`
+4. **Run**: `npm run dev`
+</file>
+
+<file path="vite.config.ts">
+/// <reference types="vitest" />
+import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
+import path from 'path'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  server: {
+    headers: {
+      // "Cross-Origin-Opener-Policy": "same-origin",
+      // "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+  },
+  optimizeDeps: {
+    exclude: ['@google/generative-ai'],
+  },
+  test: {
+    environment: 'happy-dom',
+    globals: true
+  }
+})
+</file>
+
+</files>

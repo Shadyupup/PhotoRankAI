@@ -120,23 +120,42 @@ export function useAIPipeline() {
                     logger.info(`Pipeline: Starting batch analysis for ${tasks.length} photos: [${taskIds.join(', ')}]`);
 
                     // Execute logic inline (awaiting it)
-                    const blobs = tasks.map(t => t.analysisBlob).filter((b): b is Blob => !!b);
-                    if (blobs.length !== tasks.length) throw new Error("Missing analysis data for some task");
+                    // Execute logic inline (awaiting it)
+                    const items = tasks.map(t => ({ id: t.id, blob: t.analysisBlob })).filter((item): item is { id: string, blob: Blob } => !!item.blob);
 
-                    const results = await analyzePhotosBatch(blobs);
+                    if (items.length !== tasks.length) throw new Error("Missing analysis data for some task");
+
+                    const results = await analyzePhotosBatch(items);
                     logger.info("AI 返回结果数组:", results);
+
+                    // Create a Map for O(1) Lookup by ID
+                    const resultMap = new Map(results.map(r => [r.file_id, r]));
+
+                    if (results.length !== tasks.length) {
+                        logger.error(`Batch mismatch: Sent ${tasks.length}, Got ${results.length}. Handling individual items...`);
+                    }
 
                     // Critical: Always save results even if component unmounted (Zombie process handling)
                     await db.transaction('rw', db.photos, async () => {
                         for (let i = 0; i < tasks.length; i++) {
-                            // 增加防御性编程：防止 results[i] 为空
-                            const res = results[i] || { score: 1, reason: "AI 返回数据格式异常" };
-                            await db.photos.update(tasks[i].id, {
-                                score: parseFloat(String(res.score)) || 0, // 强转为浮点数
-                                reason: res.reason || "无理由",
-                                status: 'scored',
-                                updatedAt: Date.now()
-                            });
+                            const task = tasks[i];
+                            const res = resultMap.get(task.id);
+
+                            if (res) {
+                                await db.photos.update(task.id, {
+                                    score: parseFloat(String(res.score)) || 0, // 强转为浮点数
+                                    reason: res.reason || "无理由",
+                                    status: 'scored',
+                                    analysisBlob: undefined, // Free up space!
+                                    updatedAt: Date.now()
+                                });
+                            } else {
+                                logger.warn(`Missing result for ID: ${task.id} - Re-queuing`);
+                                await db.photos.update(task.id, {
+                                    status: 'queued',
+                                    updatedAt: Date.now()
+                                });
+                            }
                         }
                     });
                     logger.success(`Pipeline: Successfully scored batch of ${tasks.length}`);

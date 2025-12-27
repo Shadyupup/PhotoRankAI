@@ -29,10 +29,15 @@ export const PhotoCard = memo(({ photo, style, className, selected, onToggleSele
     return (
         <motion.div
             layout
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.3 }}
+            exit={{ opacity: 0, scale: 0.5 }}
+            transition={{
+                type: "spring",
+                stiffness: 300,
+                damping: 25,
+                layout: { duration: 0.4 }
+            }}
             style={style}
             className={cn("relative group", className)}
         >

@@ -128,5 +128,6 @@ export function useDirectoryLoader() {
         }
     }, []);
 
-    return { loadDirectory, loadFiles, cancelLoad, isLoading, files, error };
+    const supportsFileSystemAccess = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+    return { loadDirectory, loadFiles, cancelLoad, isLoading, files, error, supportsFileSystemAccess };
 }

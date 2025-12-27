@@ -18,7 +18,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 // Pipeline statistics interface removed (now literal)
 
 function App() {
-  const { loadDirectory, loadFiles, files, isLoading: isScanning } = useDirectoryLoader();
+  const { loadDirectory, loadFiles, files, isLoading: isScanning, supportsFileSystemAccess } = useDirectoryLoader();
   useAIPipeline(); // Start Pipeline silently
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -55,23 +55,43 @@ function App() {
     return counts;
   }, []) || { new: 0, processing: 0, done: 0, queued: 0, analyzing: 0, scored: 0, error: 0, total: 0 };
 
-  // Main Photos Query
-  // Main Photos Query - Fixed to include everything even when sorting
+  /* Main Photos Query - 增强版 */
   const photos = useLiveQuery(async () => {
-    let result = await db.photos.toArray();
+    const all = await db.photos.toArray();
 
-    // Manual sort to prevent Dexie from excluding unscored items during 'orderBy'
+    // 1. 创建副本，确保不修改原始引用，配合 React 状态更新
+    const result = [...all];
+
     result.sort((a, b) => {
       if (sortMode === 'score') {
-        const scoreA = typeof a.score === 'number' ? a.score : 0;
-        const scoreB = typeof b.score === 'number' ? b.score : 0;
-        return scoreB - scoreA;
+        // --- 强健的数值转换逻辑 ---
+        const getVal = (v: any) => {
+          if (v === undefined || v === null) return -1; // 无分数的排最后
+          const n = Number(v);
+          return isNaN(n) ? -1 : n; // 非数字的也排最后
+        };
+
+        const valA = getVal(a.score);
+        const valB = getVal(b.score);
+
+        // 如果分数不相等，直接按分数降序（大到小）
+        if (valA !== valB) {
+          return valB - valA;
+        }
+        // 如果分数相等（比如都是 0 或都是 8.5），继续往下走，使用时间作为二级排序
       }
-      return (b.createdAt || 0) - (a.createdAt || 0); // Default to Newest First
+
+      // --- 默认/二级排序：按时间倒序 (新 -> 旧) ---
+      return (b.createdAt || 0) - (a.createdAt || 0);
     });
 
+    // 调试日志：打开浏览器控制台(F12)查看前3个元素，确认数据层是否正确
+    if (result.length > 0) {
+      console.log(`[Sort Debug] Mode: ${sortMode}. Top 1: Score=${result[0].score}, ID=${result[0].id}`);
+    }
+
     if (minScore > 0) {
-      result = result.filter(p => (p.score || 0) >= minScore);
+      return result.filter(p => (Number(p.score) || 0) >= minScore);
     }
     return result;
   }, [sortMode, minScore]) || [];
@@ -279,6 +299,7 @@ function App() {
         queueLength={stats.queued}
         analyzingCount={stats.analyzing}
         errorCount={stats.error}
+        supportsFileSystemAccess={supportsFileSystemAccess}
       />
 
       {/* Toolbar */}

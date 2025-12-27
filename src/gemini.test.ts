@@ -30,7 +30,7 @@ vi.mock('@google/generative-ai', () => ({
 describe('Gemini Fallback Logic (Batch)', () => {
     it('should fall back to next model if the first one returns 404', async () => {
         const mockBlob = new Blob(['fake'], { type: 'image/jpeg' });
-        const results = await analyzePhotosBatch([mockBlob]);
+        const results = await analyzePhotosBatch([{ id: 'test-1', blob: mockBlob }]);
 
         expect(results).toHaveLength(1);
         expect(results[0].score).toBe(9.9);

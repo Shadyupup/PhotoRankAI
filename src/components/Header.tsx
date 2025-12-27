@@ -11,9 +11,10 @@ interface HeaderProps {
     queueLength: number;
     analyzingCount: number;
     errorCount: number;
+    supportsFileSystemAccess?: boolean;
 }
 
-export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount }: HeaderProps) {
+export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
     const processingProgress = total > 0 ? (processed / total) * 100 : 0;
     const analysisProgress = total > 0 ? (analyzed / total) * 100 : 0;
 
@@ -94,13 +95,19 @@ export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, a
                 >
                     <Settings size={18} />
                 </button>
-                <button
-                    onClick={onOpenFolder}
-                    className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-95 duration-100"
-                >
-                    <FolderOpen size={16} />
-                    Import Folder
-                </button>
+                {supportsFileSystemAccess ? (
+                    <button
+                        onClick={onOpenFolder}
+                        className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-95 duration-100"
+                    >
+                        <FolderOpen size={16} />
+                        Import Folder
+                    </button>
+                ) : (
+                    <div className="text-xs text-gray-500 px-2">
+                        (Drag & Drop supported)
+                    </div>
+                )}
             </div>
         </header>
     );

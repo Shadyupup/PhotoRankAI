@@ -12,18 +12,55 @@ export function PhotoDetailModal({ photo, onClose }: PhotoDetailModalProps) {
     const [src, setSrc] = useState<string | null>(null);
 
     useEffect(() => {
-        // Prefer analysis blob (1024px) for detail view, fall back to preview
-        const blob = photo.analysisBlob || photo.previewBlob;
-        if (blob) {
-            const url = URL.createObjectURL(blob);
-            // eslint-disable-next-line react-hooks/set-state-in-effect
-            setSrc(url);
-            return () => URL.revokeObjectURL(url);
-        } else if (photo.file) {
-            const url = URL.createObjectURL(photo.file);
-            setSrc(url);
-            return () => URL.revokeObjectURL(url);
-        }
+        let activeUrl = '';
+        let cancelled = false;
+
+        const loadContent = async () => {
+            try {
+                // 1. Try Analysis Blob (High Res Cache - fastest if available)
+                if (photo.analysisBlob) {
+                    activeUrl = URL.createObjectURL(photo.analysisBlob);
+                    if (!cancelled) setSrc(activeUrl);
+                    return;
+                }
+
+                // 2. Try Original File Object (RAM - fastest source)
+                if (photo.file) {
+                    activeUrl = URL.createObjectURL(photo.file);
+                    if (!cancelled) setSrc(activeUrl);
+                    return;
+                }
+
+                // 3. Try File System Handle (Disk - fast but async)
+                if (photo.handle) {
+                    try {
+                        const file = await photo.handle.getFile();
+                        activeUrl = URL.createObjectURL(file);
+                        if (!cancelled) setSrc(activeUrl);
+                        return;
+                    } catch (err) {
+                        console.warn("Failed to read from handle", err);
+                        // Fall through
+                    }
+                }
+
+                // 4. Fallback to Preview (Low Res Cache - always available)
+                if (photo.previewBlob) {
+                    activeUrl = URL.createObjectURL(photo.previewBlob);
+                    if (!cancelled) setSrc(activeUrl);
+                }
+            } catch (e) {
+                console.error("Failed to load image content", e);
+            }
+        };
+
+        setSrc(null); // Reset while loading
+        loadContent();
+
+        return () => {
+            cancelled = true;
+            if (activeUrl) URL.revokeObjectURL(activeUrl);
+        };
     }, [photo]);
 
     return (

@@ -1,7 +1,7 @@
 import { PhotoMetadata } from '@/lib/db';
 import { PhotoCard } from './PhotoCard';
-import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect } from 'react';
+import { useEffect, forwardRef } from 'react';
+import { VirtuosoGrid } from 'react-virtuoso';
 
 interface PhotoGridProps {
     photos: PhotoMetadata[];
@@ -25,24 +25,38 @@ export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView }: Photo
     }
 
     return (
-        <div className="w-full h-full p-6 overflow-y-auto custom-scrollbar">
-            <motion.div
-                layout
-                className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6 pb-20"
-            >
-                <AnimatePresence mode='popLayout'>
-                    {photos.map((photo) => (
-                        <PhotoCard
-                            key={photo.id}
-                            photo={photo}
-                            style={{ width: '100%', aspectRatio: '1/1' }}
-                            selected={selectedIds.has(photo.id)}
-                            onToggleSelect={onToggleSelect}
-                            onView={onView}
-                        />
-                    ))}
-                </AnimatePresence>
-            </motion.div>
+        <div className="w-full h-full p-6">
+            <VirtuosoGrid
+                style={{ height: '100%' }}
+                totalCount={photos.length}
+                data={photos}
+                computeItemKey={(index, item) => item.id}
+                components={{
+                    List: forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ style, children, ...props }, ref) => (
+                        <div
+                            ref={ref}
+                            {...props}
+                            style={style}
+                            className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6 pb-20"
+                        >
+                            {children}
+                        </div>
+                    )),
+                    Item: (props) => (
+                        <div {...props} style={{ ...props.style, width: '100%', aspectRatio: '1/1' }} />
+                    )
+                }}
+                itemContent={(_, photo) => (
+                    <PhotoCard
+                        key={photo.id}
+                        photo={photo}
+                        style={{ width: '100%', height: '100%' }}
+                        selected={selectedIds.has(photo.id)}
+                        onToggleSelect={onToggleSelect}
+                        onView={onView}
+                    />
+                )}
+            />
         </div>
     );
 }
