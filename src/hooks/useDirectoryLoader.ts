@@ -33,16 +33,14 @@ export function useDirectoryLoader() {
         setIsLoading(true);
         setError(null);
         try {
-            // @ts-ignore
             const dirHandle = await window.showDirectoryPicker();
             if (controller.signal.aborted) return;
 
             const entries: FileEntry[] = [];
-
+            let skippedCount = 0;
             async function scanDirectory(handle: FileSystemDirectoryHandle, pathPrefix: string) {
                 if (controller.signal.aborted) return;
 
-                // @ts-ignore
                 for await (const entry of handle.values()) {
                     if (controller.signal.aborted) return;
 
@@ -50,14 +48,16 @@ export function useDirectoryLoader() {
 
                     if (entry.kind === 'file') {
                         const fileHandle = entry as FileSystemFileHandle;
-                        // Filter for images with extended format support
-                        if (/\.(jpg|jpeg|png|webp|avif)$/i.test(entry.name)) {
+                        // Filter for images with extended format support (Added .dng)
+                        if (/\.(jpg|jpeg|png|webp|avif|dng)$/i.test(entry.name)) {
                             entries.push({
                                 id: relativePath,
                                 handle: fileHandle,
                                 name: entry.name,
                                 path: relativePath
                             });
+                        } else {
+                            skippedCount++;
                         }
                     } else if (entry.kind === 'directory') {
                         await scanDirectory(entry as FileSystemDirectoryHandle, relativePath);
@@ -66,15 +66,20 @@ export function useDirectoryLoader() {
             }
 
             await scanDirectory(dirHandle, "");
+            if (skippedCount > 0) {
+                logger.warn(`Skipped ${skippedCount} non-image or RAW files. Currently only JPG, PNG, WEBP, and DNG are supported.`);
+            }
 
             if (controller.signal.aborted) return;
 
             logger.success(`Scanned directory`, { count: entries.length });
             setFiles(entries);
-        } catch (err: any) {
-            if (err.name !== 'AbortError' && !controller.signal.aborted) {
-                setError(err.message || 'Failed to load directory');
-                logger.error(`Directory scan failed`, { error: err.message });
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if ((err as any)?.name !== 'AbortError' && !controller.signal.aborted) {
+                setError(errorMessage || 'Failed to load directory');
+                logger.error(`Directory scan failed`, { error: errorMessage });
             } else {
                 logger.info('Directory scan aborted');
             }
@@ -93,25 +98,31 @@ export function useDirectoryLoader() {
         setError(null);
 
         try {
-            const entries: FileEntry[] = fileList
-                .filter(f => /\.(jpg|jpeg|png|webp|avif)$/i.test(f.name))
-                .map(f => ({
-                    id: `drop-${Date.now()}-${f.name}`,
-                    // We don't need a mock handle anymore, we pass the file directly
-                    file: f,
-                    name: f.name,
-                    path: f.name
-                }));
+            const originalCount = fileList.length;
+            const validFiles = fileList.filter(f => /\.(jpg|jpeg|png|webp|avif|dng)$/i.test(f.name));
+            const skipped = originalCount - validFiles.length;
+
+            const entries: FileEntry[] = validFiles.map(f => ({
+                id: `drop-${Date.now()}-${f.name}`,
+                file: f,
+                name: f.name,
+                path: f.name
+            }));
+
+            if (skipped > 0) {
+                logger.warn(`Skipped ${skipped} files. Only JPG, PNG, WEBP, and DNG are currently supported.`);
+            }
 
             if (entries.length === 0) {
-                throw new Error("No image files found in selection");
+                throw new Error("No supported image files found. Please use JPG, PNG, WEBP, or DNG.");
             }
 
             logger.success(`Processed dropped files`, { count: entries.length });
             setFiles(entries); // Replace files
-        } catch (err: any) {
-            setError(err.message || 'Failed to process files');
-            logger.error(`File drop failed`, { error: err.message });
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            setError(errorMessage || 'Failed to process files');
+            logger.error(`File drop failed`, { error: errorMessage });
         } finally {
             setIsLoading(false);
         }

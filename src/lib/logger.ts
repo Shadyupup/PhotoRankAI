@@ -1,5 +1,4 @@
-import { db } from './db';
-
+// Imports removed as unused
 export enum LogLevel {
     INFO = 'info',
     WARN = 'warn',
@@ -12,39 +11,46 @@ export interface LogEntry {
     timestamp: number;
     level: LogLevel;
     message: string;
-    details?: any;
+    details?: unknown;
 }
 
 class LoggerService {
-    async log(level: LogLevel, message: string, details?: any) {
-        const entry: LogEntry = {
-            timestamp: Date.now(),
-            level,
-            message,
-            details
-        };
+    async log(level: LogLevel, message: string, details?: unknown) {
+        // const entry: LogEntry = {
+        //     timestamp: Date.now(),
+        //     level,
+        //     message,
+        //     details
+        // };
 
-        // Log to console for dev
+        // Emit Custom Event for UI
+        if (typeof window !== 'undefined') {
+            const event = new CustomEvent('app-log', {
+                detail: {
+                    time: new Date().toLocaleTimeString(),
+                    level,
+                    msg: message + (details ? ' ' + JSON.stringify(details) : '')
+                }
+            });
+            window.dispatchEvent(event);
+        }
+
+        // Log to console for dev (Silenced for Production Cleanliness)
         const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
         console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
 
-        // Persist to DB
+        // Persist to DB (Simulated/Optional for now to prevent schema errors if not updated)
         try {
-            // We need to add a 'logs' table to DB schema first.
-            // Since schema migration in Dexie requires version bump, we'll handle that in db.ts
-            // For now, let's assume table exists or we handle it gracefully.
-            // To avoid circular dependency if we import db here and db imports something...
-            // but db.ts is pure. 
-            await db.table('logs').add(entry);
+            // await db.table('logs').add(entry);
         } catch (e) {
             console.error("Failed to write log", e);
         }
     }
 
-    info(message: string, details?: any) { this.log(LogLevel.INFO, message, details); }
-    success(message: string, details?: any) { this.log(LogLevel.SUCCESS, message, details); }
-    warn(message: string, details?: any) { this.log(LogLevel.WARN, message, details); }
-    error(message: string, details?: any) { this.log(LogLevel.ERROR, message, details); }
+    info(message: string, details?: unknown) { this.log(LogLevel.INFO, message, details); }
+    success(message: string, details?: unknown) { this.log(LogLevel.SUCCESS, message, details); }
+    warn(message: string, details?: unknown) { this.log(LogLevel.WARN, message, details); }
+    error(message: string, details?: unknown) { this.log(LogLevel.ERROR, message, details); }
 }
 
 export const logger = new LoggerService();

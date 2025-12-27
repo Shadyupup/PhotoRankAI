@@ -15,13 +15,13 @@ export interface PhotoMetadata {
     score?: number;
     reason?: string;
 
-    handle?: FileSystemFileHandle;
     file?: File; // Store direct File object for dropped files (supported by IndexedDB)
     // Meta
     status: 'new' | 'processing' | 'done' | 'queued' | 'analyzing' | 'scored' | 'error';
     width?: number;
     height?: number;
     createdAt: number;
+    updatedAt?: number;
 }
 
 export interface LogEntry {
@@ -29,7 +29,7 @@ export interface LogEntry {
     timestamp: number;
     level: 'info' | 'warn' | 'error';
     message: string;
-    details?: any;
+    details?: unknown;
 }
 
 export class PhotoRankDB extends Dexie {
@@ -38,7 +38,8 @@ export class PhotoRankDB extends Dexie {
 
     constructor() {
         super('PhotoRankDB');
-        this.version(2).stores({
+        // 强行提到 25（必须比你之前看到的 21 大）
+        this.version(25).stores({
             photos: 'id, status, score, createdAt',
             logs: '++id, timestamp, level'
         });

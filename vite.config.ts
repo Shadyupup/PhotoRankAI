@@ -1,4 +1,5 @@
-import { defineConfig } from 'vite'
+/// <reference types="vitest" />
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
@@ -12,12 +13,15 @@ export default defineConfig({
   },
   server: {
     headers: {
-      "Cross-Origin-Opener-Policy": "same-origin",
-      "Cross-Origin-Embedder-Policy": "require-corp",
+      // "Cross-Origin-Opener-Policy": "same-origin",
+      // "Cross-Origin-Embedder-Policy": "require-corp",
     },
   },
   optimizeDeps: {
     exclude: ['@google/generative-ai'],
-    include: ['react-window', 'react-virtualized-auto-sizer']
+  },
+  test: {
+    environment: 'happy-dom',
+    globals: true
   }
 })

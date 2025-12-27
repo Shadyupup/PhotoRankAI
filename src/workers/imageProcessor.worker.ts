@@ -6,11 +6,15 @@ self.onmessage = async (e: MessageEvent) => {
     try {
         const bitmap = await createImageBitmap(file);
 
+        console.log(`[Worker] Processing ${id}: Start Compression...`);
+
         // 1. Generate Thumbnail (300px)
         const thumbBlob = await resizeImage(bitmap, 300);
 
         // 2. Generate Analysis (1024px)
         const analysisBlob = await resizeImage(bitmap, 1024);
+
+        console.log(`[Worker] Processing ${id}: Compression Complete. Thumb=${thumbBlob?.size}, Analysis=${analysisBlob?.size}`);
 
         self.postMessage({
             id,
@@ -20,8 +24,9 @@ self.onmessage = async (e: MessageEvent) => {
         });
 
         bitmap.close();
-    } catch (err: any) {
-        self.postMessage({ id, status: 'error', error: err.message });
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        self.postMessage({ id, status: 'error', error: message });
     }
 };
 

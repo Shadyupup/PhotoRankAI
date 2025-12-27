@@ -1,6 +1,7 @@
 import { PhotoMetadata } from '@/lib/db';
 import { PhotoCard } from './PhotoCard';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useEffect } from 'react';
 
 interface PhotoGridProps {
     photos: PhotoMetadata[];
@@ -10,6 +11,11 @@ interface PhotoGridProps {
 }
 
 export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView }: PhotoGridProps) {
+    useEffect(() => {
+        const scoredCount = photos.filter(p => p.status === 'scored').length;
+        console.log(`[UI] PhotoGrid Rendered. Total=${photos.length}, Scored=${scoredCount}`);
+    }, [photos]);
+
     if (photos.length === 0) {
         return (
             <div className="w-full h-full flex flex-col items-center justify-center text-gray-500">

@@ -3,67 +3,97 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, PhotoMetadata } from '@/lib/db';
 import { useDirectoryLoader } from '@/hooks/useDirectoryLoader';
 import { useAIPipeline } from '@/hooks/useAIPipeline';
-import { AppShell } from '@/components/AppShell';
 import { PhotoGrid } from '@/components/PhotoGrid';
-import { FolderOpen, ArrowDownWideNarrow, Filter, Upload, Loader2 } from 'lucide-react';
+import { Header } from '@/components/Header';
+import { Toolbar } from '@/components/Toolbar';
+import { PhotoDetailModal } from '@/components/PhotoDetailModal';
+import { Toaster, toast } from 'sonner';
+import { DebugConsole } from './components/DebugConsole';
+import { Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { logger } from '@/lib/logger';
+import { AdminDashboard } from './components/AdminDashboard';
 
-import { PhotoDetailModal } from '@/components/PhotoDetailModal';
-
-type SortMode = 'date' | 'score';
+// Type for Stats
+// Pipeline statistics interface removed (now literal)
 
 function App() {
-  const { loadDirectory, loadFiles, cancelLoad, files, isLoading: isScanning } = useDirectoryLoader();
-  const { queueAll, isAnalyzing } = useAIPipeline();
+  const { loadDirectory, loadFiles, files, isLoading: isScanning } = useDirectoryLoader();
+  useAIPipeline(); // Start Pipeline silently
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [sortMode, setSortMode] = useState<SortMode>('date');
+  const [sortMode, setSortMode] = useState<'date' | 'score'>('date');
   const [minScore, setMinScore] = useState<number>(0);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [autoMode, setAutoMode] = useState(false);
   const [viewingPhoto, setViewingPhoto] = useState<PhotoMetadata | null>(null);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
 
+  // Keyboard shortcut for Admin
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Use Alt+Shift+A for Admin
+      if (e.altKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+        setIsAdminOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Detailed Pipeline Stats
+  const stats = useLiveQuery(async () => {
+    const counts = {
+      new: await db.photos.where('status').equals('new').count(),
+      processing: await db.photos.where('status').equals('processing').count(),
+      done: await db.photos.where('status').equals('done').count(),
+      queued: await db.photos.where('status').equals('queued').count(),
+      analyzing: await db.photos.where('status').equals('analyzing').count(),
+      scored: await db.photos.where('status').equals('scored').count(),
+      error: await db.photos.where('status').equals('error').count(),
+      total: await db.photos.count(),
+    };
+    return counts;
+  }, []) || { new: 0, processing: 0, done: 0, queued: 0, analyzing: 0, scored: 0, error: 0, total: 0 };
+
+  // Main Photos Query
+  // Main Photos Query - Fixed to include everything even when sorting
   const photos = useLiveQuery(async () => {
-    let collection;
-    if (sortMode === 'score') {
-      collection = db.photos.orderBy('score').reverse();
-    } else {
-      collection = db.photos.orderBy('createdAt');
-    }
+    let result = await db.photos.toArray();
 
-    let result = await collection.toArray();
+    // Manual sort to prevent Dexie from excluding unscored items during 'orderBy'
+    result.sort((a, b) => {
+      if (sortMode === 'score') {
+        const scoreA = typeof a.score === 'number' ? a.score : 0;
+        const scoreB = typeof b.score === 'number' ? b.score : 0;
+        return scoreB - scoreA;
+      }
+      return (b.createdAt || 0) - (a.createdAt || 0); // Default to Newest First
+    });
+
     if (minScore > 0) {
       result = result.filter(p => (p.score || 0) >= minScore);
     }
     return result;
   }, [sortMode, minScore]) || [];
 
-  // Derived State
-  const totalCount = photos.length;
-  const finishedCount = photos.filter(p => ['scored', 'error'].includes(p.status)).length;
-  const hasPhotos = totalCount > 0;
-  const isComplete = hasPhotos && finishedCount === totalCount && !isScanning;
-
-  const [forceShowResults, setForceShowResults] = useState(false);
-
-  // Show grid if complete OR forced
-  const showGrid = (isComplete || forceShowResults) && hasPhotos;
-  // Busy if not showing grid and drag-dropping is not happening (and has photos)
-  const isBusy = (isScanning || (hasPhotos && !isComplete)) && !showGrid;
+  const hasPhotos = stats.total > 0;
+  const isComplete = hasPhotos && stats.scored === stats.total && !isScanning;
+  const processedCount = stats.total - stats.new - stats.processing;
 
   // Auto-switch to Score sort when complete
   useEffect(() => {
     if (isComplete && sortMode !== 'score') {
+      toast("All analysis complete!", { description: "Switching to score view for best results." });
       setSortMode('score');
     }
-  }, [isComplete, sortMode]);
+  }, [isComplete]);
 
   // Image Processor Worker
   const workerRef = useRef<Worker | null>(null);
   useEffect(() => {
     workerRef.current = new Worker(new URL('./workers/imageProcessor.worker.ts', import.meta.url), { type: 'module' });
     workerRef.current.onmessage = async (e) => {
-      const { id, status, thumbBlob, analysisBlob, error } = e.data;
+      const { id, status, thumbBlob, analysisBlob } = e.data;
       if (status === 'success') {
         await db.photos.update(id, {
           status: 'done',
@@ -77,15 +107,13 @@ function App() {
     return () => { workerRef.current?.terminate(); };
   }, []);
 
-  const cancelProcessing = async () => {
-    cancelLoad();
-    setForceShowResults(true);
-  };
-
   // Sync Files to DB
   useEffect(() => {
     if (files.length > 0) {
-      setAutoMode(true);
+      toast.success(`Identified ${files.length} photos`, {
+        description: "Starting local preprocessing..."
+      });
+      // Auto-mode is implicit now
       const newPhotos: PhotoMetadata[] = files.map(f => ({
         id: f.id,
         name: f.name,
@@ -98,6 +126,7 @@ function App() {
       }));
 
       db.transaction('rw', db.photos, async () => {
+        await db.photos.clear(); // Clear old for new import? Or append? Usually clear for this type of app.
         await db.photos.bulkPut(newPhotos);
       });
     }
@@ -106,6 +135,7 @@ function App() {
   // Process Loop
   useEffect(() => {
     const processNext = async () => {
+      // Find one 'new' photo
       const nextPhoto = await db.photos.where('status').equals('new').first();
       if (nextPhoto && workerRef.current) {
         await db.photos.update(nextPhoto.id, { status: 'processing' });
@@ -114,36 +144,55 @@ function App() {
           if (nextPhoto.file) {
             file = nextPhoto.file;
           } else if (nextPhoto.handle) {
-            // @ts-ignore
-            file = await nextPhoto.handle.getFile();
+            file = await (nextPhoto.handle as FileSystemFileHandle).getFile();
           } else {
             throw new Error("No file or handle available");
           }
-
           workerRef.current.postMessage({ id: nextPhoto.id, file });
-        } catch (e: any) {
-          logger.error("Failed to get file", { id: nextPhoto.id, msg: e.message });
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          logger.error("Failed to get file", { id: nextPhoto.id, msg });
           await db.photos.update(nextPhoto.id, { status: 'error' });
         }
       }
     };
+    // We trigger this whenever photos change (crudely), simpler than a dedicated loop with 'processing' check
     const hasNew = photos.some(p => p.status === 'new');
     if (hasNew) processNext();
   }, [photos]);
 
-  // Auto-Queue logic
+  // Auto-Queue logic - Now independent of the 'photos' grid array
   useEffect(() => {
-    if (autoMode) {
-      const donePhotos = photos.filter(p => p.status === 'done');
-      if (donePhotos.length > 0) {
-        db.transaction('rw', db.photos, async () => {
-          for (const p of donePhotos) {
-            await db.photos.update(p.id, { status: 'queued' });
-          }
-        }).catch(e => logger.error("Failed to auto-queue", e));
-      }
+    if (stats.done > 0) {
+      const runAutoQueue = async () => {
+        const doneList = await db.photos.where('status').equals('done').toArray();
+        if (doneList.length > 0) {
+          logger.info(`Auto-queuing ${doneList.length} photos`);
+          await db.transaction('rw', db.photos, async () => {
+            for (const p of doneList) {
+              await db.photos.update(p.id, { status: 'queued' });
+            }
+          });
+          window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
+        }
+      };
+      runAutoQueue();
     }
-  }, [photos, autoMode]);
+  }, [stats.done]);
+
+  // Trigger pipeline check if conditions are met
+  useEffect(() => {
+    // Assuming loadQueue is a state or derived value indicating if files are currently being loaded
+    // For this context, we'll assume it's always empty if not explicitly loading, or you might need to define it.
+    // For now, let's assume `files.length === 0` implies no active loading from `useDirectoryLoader`
+    const loadQueueLength = files.length; // Or a more specific state if available
+
+    if (stats.done > 0 && stats.total > stats.done && loadQueueLength === 0) {
+      // If we have photos, and not everything is done, and not currently loading specific files...
+      // Trigger pipeline check if not running
+      window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
+    }
+  }, [stats.done, stats.total, files.length]);
 
 
   // Drag Handlers
@@ -152,11 +201,38 @@ function App() {
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const droppedFiles = Array.from(e.dataTransfer.files);
-      await loadFiles(droppedFiles);
+
+    const items = e.dataTransfer.items;
+    if (!items) return;
+
+    const files: File[] = [];
+
+    async function traverse(item: FileSystemEntry) {
+      if (item.isFile) {
+        const fileEntry = item as FileSystemFileEntry;
+        const file = await new Promise<File>(res => fileEntry.file(res));
+        files.push(file);
+      } else if (item.isDirectory) {
+        const dirEntry = item as FileSystemDirectoryEntry;
+        const reader = dirEntry.createReader();
+        const entries = await new Promise<FileSystemEntry[]>(res => reader.readEntries(res));
+        for (const entry of entries) {
+          await traverse(entry);
+        }
+      }
+    }
+
+    const promises = [];
+    for (const item of items) {
+      const entry = item.webkitGetAsEntry();
+      if (entry) promises.push(traverse(entry));
+    }
+
+    await Promise.all(promises);
+    if (files.length > 0) {
+      await loadFiles(files);
     } else {
-      logger.warn("Drop event contained no files");
+      logger.warn("Drop event contained no valid files or folders");
     }
   };
 
@@ -167,84 +243,91 @@ function App() {
     setSelectedIds(next);
   };
 
-  return (
-    <AppShell>
-      {/* Toolbar */}
-      <div className="flex-none h-16 px-6 flex items-center justify-end gap-3 border-b border-gray-800 bg-[#0f0f0f] z-20">
-        <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700 items-center">
-          <span className="text-blue-400 font-bold text-sm px-3 flex items-center gap-2">
-            <ArrowDownWideNarrow size={16} /> Score
-          </span>
-          <div className="w-px h-4 bg-gray-600 mx-1" />
-          <div className="flex items-center px-2 gap-2 text-sm">
-            <Filter size={14} className="text-gray-400" />
-            <input
-              type="range" min="0" max="9" step="0.5"
-              value={minScore} onChange={e => setMinScore(Number(e.target.value))}
-              className="w-20"
-            />
-            <span className="w-4">{minScore > 0 ? minScore : ''}</span>
-          </div>
-        </div>
-        <button onClick={loadDirectory} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center gap-2">
-          <FolderOpen size={18} /> Open Folder
-        </button>
-      </div>
+  const handleRetryErrors = async () => {
+    logger.info("Retrying all failed analyses...");
+    await db.transaction('rw', db.photos, async () => {
+      const errorPhotos = await db.photos.where('status').equals('error').toArray();
+      for (const p of errorPhotos) {
+        await db.photos.update(p.id, { status: 'queued' });
+      }
+    });
+  };
 
-      <div className="flex-1 w-full h-full relative">
-        {!hasPhotos && !isScanning && (
+  const isApiKeyMissing = !import.meta.env.VITE_GEMINI_API_KEY;
+
+  return (
+    <div className="flex flex-col h-screen bg-[#0F0F0F] text-white overflow-hidden font-sans selection:bg-blue-500/30">
+      <Toaster position="bottom-right" theme="dark" />
+      <DebugConsole />
+
+      {/* API Key Warning */}
+      {isApiKeyMissing && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 bg-red-500/90 backdrop-blur-md text-white px-4 py-2 rounded-full border border-red-400/50 shadow-2xl flex items-center gap-2 animate-bounce">
+          <span className="text-xs font-bold ring-1 ring-white/50 rounded-full px-1.5">!</span>
+          <span className="text-xs font-medium">VITE_GEMINI_API_KEY is missing in your .env file</span>
+        </div>
+      )}
+
+      {/* Header */}
+      <Header
+        onOpenFolder={loadDirectory}
+        onOpenAdmin={() => setIsAdminOpen(true)}
+        onRetry={handleRetryErrors}
+        total={stats.total}
+        processed={processedCount}
+        analyzed={stats.scored}
+        queueLength={stats.queued}
+        analyzingCount={stats.analyzing}
+        errorCount={stats.error}
+      />
+
+      {/* Toolbar */}
+      <Toolbar
+        sortMode={sortMode}
+        onSortChange={setSortMode}
+        minScore={minScore}
+        onMinScoreChange={setMinScore}
+      />
+
+      {/* Main Area */}
+      <div className="flex-1 relative overflow-hidden">
+        {!hasPhotos ? (
+          // Empty State
           <div
             className={cn(
-              "absolute inset-0 m-12 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-colors duration-200 cursor-pointer",
-              isDragOver ? "border-blue-500 bg-blue-500/10" : "border-gray-700 hover:border-gray-600"
+              "absolute inset-0 m-8 rounded-3xl border-2 border-dashed flex flex-col items-center justify-center transition-all duration-200",
+              isDragOver ? "border-blue-500 bg-blue-500/5 scale-[0.99]" : "border-[#262626] bg-[#161616]"
             )}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
-            <Upload size={64} className={cn("mb-6 transition-colors", isDragOver ? "text-blue-500" : "text-gray-600")} />
-            <h2 className="text-3xl font-bold mb-2">Drag and drop files here</h2>
-            <p className="text-gray-500 mb-8">or click to browse</p>
+            <div className="w-20 h-20 rounded-full bg-[#1A1A1A] flex items-center justify-center mb-6 shadow-2xl border border-[#262626]">
+              <Upload className={cn("transition-colors duration-300", isDragOver ? "text-blue-500" : "text-gray-500")} size={32} />
+            </div>
+            <h2 className="text-2xl font-bold mb-3 text-white">Drop Folder Here</h2>
+            <p className="text-gray-500 text-sm max-w-sm text-center mb-8 leading-relaxed">
+              Drag and drop your photos folder to start. AI will automatically analyze specific criteria locally and score aesthetics in the cloud.
+            </p>
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                loadDirectory();
-              }}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-medium text-lg shadow-lg hover:shadow-blue-500/25 transition-all"
+              onClick={() => document.getElementById('target-file-input')?.click()}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-blue-600/20 hover:scale-105 transition-all"
             >
               Browse Files
             </button>
+            <input
+              id="target-file-input"
+              type="file"
+              multiple
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) loadFiles(Array.from(e.target.files));
+              }}
+            />
           </div>
-        )}
-
-        {isBusy && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0f0f0f] z-50">
-            <div className="w-96 text-center">
-              <Loader2 size={64} className="animate-spin text-purple-500 mx-auto mb-8" />
-              <h2 className="text-2xl font-bold mb-4">
-                {isScanning ? "Uploading files..." : "Analyzing with Gemini..."}
-              </h2>
-              <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden mb-4">
-                <div
-                  className="h-full bg-gradient-to-r from-blue-500 to-purple-600 transition-all duration-300 ease-out"
-                  style={{ width: `${(finishedCount / (totalCount || 1)) * 100}%` }}
-                />
-              </div>
-              <p className="text-gray-400 mb-6">
-                {isScanning ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span>Scanning...</span>
-                    <button onClick={(e) => { e.stopPropagation(); cancelProcessing(); }} className="text-red-400 underline hover:text-red-300">Cancel</button>
-                  </span>
-                ) : (
-                  <span>Finished: <span className="text-green-400">{finishedCount}</span> / <span className="text-gray-400">{totalCount}</span></span>
-                )}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {showGrid && (
+        ) : (
+          // Grid
           <PhotoGrid
             photos={photos}
             selectedIds={selectedIds}
@@ -254,14 +337,23 @@ function App() {
         )}
       </div>
 
+      {/* Detail Modal */}
       {viewingPhoto && (
         <PhotoDetailModal
           photo={viewingPhoto}
           onClose={() => setViewingPhoto(null)}
         />
       )}
-    </AppShell >
-  )
+
+      {/* Admin Dashboard Overlay */}
+      {isAdminOpen && (
+        <AdminDashboard
+          onClose={() => setIsAdminOpen(false)}
+          onRetry={handleRetryErrors}
+        />
+      )}
+    </div>
+  );
 }
 
-export default App
+export default App;
