@@ -50,8 +50,10 @@ export function useDirectoryLoader() {
                         const fileHandle = entry as FileSystemFileHandle;
                         // Filter for images with extended format support (Added .dng)
                         if (/\.(jpg|jpeg|png|webp|avif|dng)$/i.test(entry.name)) {
+                            // 使用 randomUUID 确保唯一性，避免 React Key 冲突
+                            const uniqueId = `file-${crypto.randomUUID()}`;
                             entries.push({
-                                id: relativePath,
+                                id: uniqueId,
                                 handle: fileHandle,
                                 name: entry.name,
                                 path: relativePath
@@ -103,7 +105,8 @@ export function useDirectoryLoader() {
             const skipped = originalCount - validFiles.length;
 
             const entries: FileEntry[] = validFiles.map(f => ({
-                id: `drop-${Date.now()}-${f.name}`,
+                // 修复：使用 randomUUID 防止批量拖入时 ID 重复 (Date.now() 在循环中可能相同)
+                id: `drop-${crypto.randomUUID()}`,
                 file: f,
                 name: f.name,
                 path: f.name

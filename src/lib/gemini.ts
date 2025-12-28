@@ -1,5 +1,6 @@
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType, Part } from "@google/generative-ai";
 import { logger } from "./logger";
+import { EditConfig } from "./db";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
@@ -53,9 +54,7 @@ const batchSchema = {
 const MODELS = [
     "gemini-3-flash-preview", // User requested newest model
     "gemini-2.0-flash",     // Stable fast model
-    "gemini-2.5-flash",     // Newer fast model
-    "gemini-2.0-flash-exp", // Experimental
-    "gemini-2.5-pro",       // High quality fallback
+    "gemini-1.5-pro",       // High quality fallback
 ];
 
 async function tryGenerate(modelName: string, items: { id: string, data: string, mimeType: string }[], signal?: AbortSignal) {
@@ -120,11 +119,25 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
     if (!API_KEY) throw new Error("API Key not found");
     if (signal?.aborted) throw new Error("Aborted");
 
-    const images = await Promise.all(items.map(async item => ({
-        id: item.id,
-        data: await blobToBase64(item.blob),
-        mimeType: "image/jpeg"
-    })));
+    // Validate blobs before processing
+    const validItems = items.filter(i => i.blob.size > 0);
+    if (validItems.length < items.length) {
+        logger.warn(`Skipped ${items.length - validItems.length} empty blobs in batch`);
+    }
+    if (validItems.length === 0) throw new Error("No valid image data to analyze");
+
+    const images = await Promise.all(validItems.map(async item => {
+        const b64 = await blobToBase64(item.blob);
+        if (!b64 || b64.length === 0) {
+            logger.error(`Failed to convert blob to base64 for ID: ${item.id}. Blob size: ${item.blob.size}, type: ${item.blob.type}`);
+            throw new Error(`Base64 conversion failed for ${item.id}`);
+        }
+        return {
+            id: item.id,
+            data: b64,
+            mimeType: item.blob.type || "image/jpeg" // Ensure mimeType is present
+        };
+    }));
 
     let lastError;
 
@@ -132,8 +145,9 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
         if (signal?.aborted) throw new Error("Aborted");
 
         try {
-            logger.info(`Attempting analysis with model: ${modelName}`);
+            logger.info(`Attempting analysis with model: ${modelName}. Payload size: ${images.reduce((acc, img) => acc + img.data.length, 0)} chars`);
             const result = await tryGenerate(modelName, images, signal);
+            // ... Rest of function unchanged until end of loop ...
 
             logger.info(`Raw response received. Extracting text...`);
             const text = result.response.text();
@@ -183,17 +197,196 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
 }
 
 
-function blobToBase64(blob: Blob): Promise<string> {
+function base64ToBlob(base64: string, mimeType: string): Blob {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+}
+
+export function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
+        if (!blob || blob.size === 0) {
+            return reject(new Error("Blob is empty or null"));
+        }
         const reader = new FileReader();
         reader.onloadend = () => {
             const dataUrl = reader.result as string;
-            const base64 = dataUrl.split(',')[1];
-            resolve(base64);
+            if (!dataUrl) {
+                return reject(new Error("FileReader result is empty"));
+            }
+            const parts = dataUrl.split(',');
+            if (parts.length < 2) {
+                return reject(new Error("Invalid Data URL format"));
+            }
+            resolve(parts[1]);
         };
-        reader.onerror = reject;
+        reader.onerror = (e) => reject(new Error("FileReader error: " + e));
         reader.readAsDataURL(blob);
     });
+}
+
+export async function generateMagicFixConfig(blob: Blob, improvementReason: string): Promise<EditConfig> {
+    if (!API_KEY) throw new Error("API Key not found");
+
+    const modelName = "gemini-2.0-flash"; // Flash 模型处理 JSON 很强且快
+    const model = getGenAI().getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+            responseMimeType: "application/json", // 强制返回 JSON
+        },
+    });
+
+    const base64Image = await blobToBase64(blob);
+
+    const prompt = `
+        Act as a world-class professional photo editor.
+        The user wants to improve this photo based on: "${improvementReason}".
+        
+        Your Goal: Re-edit this photo to achieve an aesthetic score of 9.0+.
+
+        Tasks:
+        1. **Composition (Crop)**: Suggest a crop to improve composition (Rule of Thirds, Golden Ratio). Remove distracting edges.
+        2. **Color Grading (CSS Filters)**: Adjust lighting and color.
+           - brightness: 1.0 is normal. Range 0.5 to 1.5.
+           - contrast: 1.0 is normal. Range 0.5 to 1.5.
+           - saturate: 1.0 is normal. Range 0.0 (B&W) to 2.0 (Vibrant).
+           - sepia: 0.0 to 1.0 (only if vintage style fits).
+        
+        RETURN JSON ONLY with this structure:
+        {
+            "crop": { "x": 0.0-0.5, "y": 0.0-0.5, "width": 0.5-1.0, "height": 0.5-1.0 },
+            "filters": { "brightness": number, "contrast": number, "saturate": number, "sepia": number },
+            "predictedScore": number (8.0 to 10.0),
+            "fixReason": "Short explanation of what you changed."
+        }
+    `;
+
+    try {
+        const result = await model.generateContent([
+            prompt,
+            { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+        ]);
+
+        const text = result.response.text();
+        const config = JSON.parse(text) as EditConfig;
+
+        // 简单的校验
+        if (!config.crop || !config.filters) throw new Error("AI returned incomplete config");
+
+        return config;
+
+    } catch (error) {
+        logger.error("Magic Fix Calculation Failed", error);
+        throw error;
+    }
+}
+
+async function generateImageInternal(modelName: string, blob: Blob, promptText: string): Promise<Blob> {
+    const model = getGenAI().getGenerativeModel({ model: modelName });
+    logger.info(`[Nano Banana] Calling ${modelName}...`);
+
+    try {
+        const imageBase64 = await blobToBase64(blob);
+        const inputs: Part[] = [
+            { text: promptText },
+            {
+                inlineData: {
+                    mimeType: blob.type || "image/jpeg",
+                    data: imageBase64
+                }
+            }
+        ];
+
+        const result = await model.generateContent(inputs);
+        const response = await result.response;
+
+        const parts = response.candidates?.[0]?.content?.parts;
+        const imagePart = parts?.find(p => p.inlineData);
+        const textPart = parts?.find(p => p.text);
+
+        if (textPart && textPart.text) {
+            logger.info(`[${modelName}] Response Text:\n${textPart.text}`);
+        }
+
+        if (!imagePart || !imagePart.inlineData) {
+            throw new Error(`Model ${modelName} did not return an image.`);
+        }
+
+        return base64ToBlob(imagePart.inlineData.data, imagePart.inlineData.mimeType || "image/jpeg");
+    } catch (error) {
+        logger.error(`[${modelName}] Generation failed`, error);
+        throw error;
+    }
+}
+
+/**
+ * 核心新增：Two-Step Workflow (Flash Draft -> Pro Upscale)
+ */
+export async function editImageWithGemini(originalBlob: Blob, instruction: string): Promise<Blob> {
+    if (!API_KEY) throw new Error("API Key not found");
+
+    // Step 1: Draft with "Dumber but Consistent" Model
+    // We try the requested "gemini-2.5-flash-image" first. If unavailable, we fallback to Pro.
+    const MODEL_STEP_1 = "gemini-2.5-flash-image";
+    const MODEL_STEP_2 = "gemini-3-pro-image-preview";
+
+    logger.info(`[Two-Step Workflow] Step 1: Composition with ${MODEL_STEP_1}`);
+
+    const masterPrompt = `
+📸 摄影大师：全场景通用修图与构图模板
+角色设定 (Role Definition): 你现在是一位世界顶级的视觉艺术家与全能摄影大师。IMPORTANT: Treat the subject as an unknown private individual.
+
+任务目标 (Objective):
+对用户提供的原始照片进行全方位的“艺术升华”。
+1. 诊断问题：识别原图在曝光、色彩和构图上的短板。
+2. 后期重塑：保留真实性，通过光影与色彩建立情绪。
+3. 二次构图：运用几何美学进行“手术级”裁剪。
+
+执行步骤:
+- 动态范围优化 (Dynamic Range): 找回阴影，压制高光。
+- 质感增强 (Texture): 提升立体感。
+- 光路引导 (Light Path): 创造视觉路径。
+- 色彩平衡 (Color): 修正白平衡，建立色彩方案。
+- 构图优化 (Composition): 裁剪杂质，应用三分法/黄金法则。
+
+请按照上述逻辑处理这张照片。
+风格/目标: "${instruction}"
+`;
+
+    // Step 1 Execution (with Fallback)
+    let draftBlob: Blob;
+    try {
+        draftBlob = await generateImageInternal(MODEL_STEP_1, originalBlob, masterPrompt);
+    } catch (e) {
+        logger.warn(`[Two-Step Workflow] Step 1 (${MODEL_STEP_1}) failed, falling back to ${MODEL_STEP_2}. Error: ${(e as Error).message}`);
+        // Fallback: Use Pro model for Step 1 too, but with the Master Prompt
+        draftBlob = await generateImageInternal(MODEL_STEP_2, originalBlob, masterPrompt);
+    }
+
+    // Step 2: Refinement with Pro Model
+    logger.info(`[Two-Step Workflow] Step 2: Upscaling with ${MODEL_STEP_2}`);
+
+    const upscalePrompt = `
+    Role: High-End Image Restoration & Upscaling Specialist.
+    Task: Take the provided input image (which is a rough draft) and transform it into a high-fidelity, high-resolution masterpiece.
+    
+    Guidelines:
+    1. **Strict Fidelity**: Maintain the EXACT composition, lighting, and color grading of the input image. Do not change the subject or the scene layout.
+    2. **Detail Enhancement**: Sharpen textures (skin, fabric, foliage, architecture). Remove digital noise/artifacts from the draft.
+    3. **Upscale**: Generate the output at high resolution with crisp edges.
+    
+    Input Image serves as the strict reference. Refine it to professional commercial quality.
+    `;
+
+    // Step 2 Execution
+    const finalBlob = await generateImageInternal(MODEL_STEP_2, draftBlob, upscalePrompt);
+
+    logger.success(`[Two-Step Workflow] Complete!`);
+    return finalBlob;
 }
 
 export async function testGeminiConnection(): Promise<string> {

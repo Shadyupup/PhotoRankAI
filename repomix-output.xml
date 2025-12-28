@@ -57,6 +57,7 @@ src/
     Toolbar.tsx
   hooks/
     useAIPipeline.ts
+    useAutoOptimizer.ts
     useDirectoryLoader.ts
     useResizeObserver.ts
   lib/
@@ -92,6 +93,111 @@ vite.config.ts
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="src/hooks/useAutoOptimizer.ts">
+import { useState } from 'react';
+import { analyzePhotosBatch, editImageWithGemini } from '@/lib/gemini';
+import { db, PhotoMetadata } from '@/lib/db';
+import { logger } from '@/lib/logger';
+import { toast } from 'sonner';
+
+const TARGET_SCORE = 8.0; // 目标分数
+const MAX_ITERATIONS = 3; // 最大迭代次数 (防止无限循环消耗额度)
+
+export function useAutoOptimizer() {
+    const [isOptimizing, setIsOptimizing] = useState(false);
+
+    const startOptimization = async (photo: PhotoMetadata) => {
+        if (isOptimizing) return;
+        setIsOptimizing(true);
+
+        // 创建一个持久的 Toast 来显示进度
+        const toastId = toast.loading("启动 AI 自动化精修流水线...");
+
+        try {
+            // 1. 准备初始素材
+            let currentBlob = photo.analysisBlob || photo.previewBlob;
+            // 如果没有 Blob (比如刚加载)，尝试从 file 转换
+            if (!currentBlob && photo.file) {
+                currentBlob = new Blob([photo.file], { type: photo.file.type });
+            }
+            if (!currentBlob) throw new Error("无法获取原图数据");
+
+            // 2. 初始化状态
+            let currentScore = photo.score || 0;
+            let currentReason = photo.reason || "General improvement for professional look";
+
+            // 如果初始没有分数，先跑一次评分 (使用 gemini-3-flash-preview)
+            if (!photo.score) {
+                toast.loading("正在进行初始评分 (Gemini 3 Flash)...", { id: toastId });
+                const initRes = await analyzePhotosBatch([{ id: 'init', blob: currentBlob }]);
+                currentScore = initRes[0].score;
+                currentReason = initRes[0].reason;
+            }
+
+            let iteration = 0;
+
+            // --- 核心循环 (Auto Loop) ---
+            while (currentScore < TARGET_SCORE && iteration < MAX_ITERATIONS) {
+                iteration++;
+                logger.info(`>>> [迭代 ${iteration}] 当前分数: ${currentScore}. 改进目标: ${currentReason}`);
+
+                // A. 修图阶段 (使用 gemini-3-pro-image-preview)
+                toast.loading(`[第 ${iteration} 轮] Nano Banana 正在修图...\n目标: "${currentReason.slice(0, 30)}..."`, { id: toastId });
+
+                // 调用生图接口
+                const newBlob = await editImageWithGemini(currentBlob, currentReason);
+
+                // B. 验收阶段 (使用 gemini-3-flash-preview)
+                toast.loading(`[第 ${iteration} 轮] Gemini 3 Flash 正在验收评分...`, { id: toastId });
+
+                const analysisResult = await analyzePhotosBatch([{ id: `iter-${iteration}`, blob: newBlob }]);
+                const result = analysisResult[0];
+
+                logger.info(`<<< [迭代 ${iteration}] 结果: ${result.score}分 (原 ${currentScore}分)`);
+
+                // 更新循环状态
+                currentScore = result.score;
+                currentReason = result.reason; // 新的改进意见将用于下一轮（如果需要的话）
+                currentBlob = newBlob;         // 基础图更新为新图
+            }
+
+            // --- 循环结束，保存结果 ---
+            const isSuccess = currentScore >= TARGET_SCORE;
+            const finalMsg = isSuccess
+                ? `🎉 优化成功！最终分数: ${currentScore}`
+                : `⚠️ 迭代结束 (未达 8.0). 最终: ${currentScore}`;
+
+            if (isSuccess) toast.success(finalMsg, { id: toastId });
+            else toast.warning(finalMsg, { id: toastId });
+
+            // 写入数据库
+            await db.transaction('rw', db.photos, async () => {
+                await db.photos.update(photo.id, {
+                    analysisBlob: currentBlob, // 替换用于分析的高清图
+                    previewBlob: currentBlob,  // 替换预览图
+                    score: currentScore,
+                    reason: currentReason,
+                    status: 'scored',
+                    updatedAt: Date.now()
+                });
+            });
+
+            // 通知 UI 刷新
+            window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
+
+        } catch (error) {
+            console.error(error);
+            const errMsg = error instanceof Error ? error.message : String(error);
+            toast.error("自动化精修中断: " + errMsg, { id: toastId });
+        } finally {
+            setIsOptimizing(false);
+        }
+    };
+
+    return { startOptimization, isOptimizing };
+}
+</file>
 
 <file path="public/vite.svg">
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="31.88" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 257"><defs><linearGradient id="IconifyId1813088fe1fbc01fb466" x1="-.828%" x2="57.636%" y1="7.652%" y2="78.411%"><stop offset="0%" stop-color="#41D1FF"></stop><stop offset="100%" stop-color="#BD34FE"></stop></linearGradient><linearGradient id="IconifyId1813088fe1fbc01fb467" x1="43.376%" x2="50.316%" y1="2.242%" y2="89.03%"><stop offset="0%" stop-color="#FFEA83"></stop><stop offset="8.333%" stop-color="#FFDD35"></stop><stop offset="100%" stop-color="#FFA800"></stop></linearGradient></defs><path fill="url(#IconifyId1813088fe1fbc01fb466)" d="M255.153 37.938L134.897 252.976c-2.483 4.44-8.862 4.466-11.382.048L.875 37.958c-2.746-4.814 1.371-10.646 6.827-9.67l120.385 21.517a6.537 6.537 0 0 0 2.322-.004l117.867-21.483c5.438-.991 9.574 4.796 6.877 9.62Z"></path><path fill="url(#IconifyId1813088fe1fbc01fb467)" d="M185.432.063L96.44 17.501a3.268 3.268 0 0 0-2.634 3.014l-5.474 92.456a3.268 3.268 0 0 0 3.997 3.378l24.777-5.718c2.318-.535 4.413 1.507 3.936 3.838l-7.361 36.047c-.495 2.426 1.782 4.5 4.151 3.78l15.304-4.649c2.372-.72 4.652 1.36 4.15 3.788l-11.698 56.621c-.732 3.542 3.979 5.473 5.943 2.437l1.313-2.028l72.516-144.72c1.215-2.423-.88-5.186-3.54-4.672l-25.505 4.922c-2.396.462-4.435-1.77-3.759-4.114l16.646-57.705c.677-2.35-1.37-4.583-3.769-4.113Z"></path></svg>
@@ -444,123 +550,6 @@ export function DebugConsole() {
 }
 </file>
 
-<file path="src/components/Header.tsx">
-import { FolderOpen, Settings } from 'lucide-react';
-import { motion } from 'framer-motion';
-
-interface HeaderProps {
-    onOpenFolder: () => void;
-    onOpenAdmin?: () => void;
-    onRetry?: () => void;
-    total: number;
-    processed: number; // Local processing done
-    analyzed: number;  // AI Analysis done
-    queueLength: number;
-    analyzingCount: number;
-    errorCount: number;
-    supportsFileSystemAccess?: boolean;
-}
-
-export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
-    const processingProgress = total > 0 ? (processed / total) * 100 : 0;
-    const analysisProgress = total > 0 ? (analyzed / total) * 100 : 0;
-
-    return (
-        <header className="h-16 px-6 border-b border-[#262626] bg-[#0F0F0F] flex items-center justify-between z-30 relative shadow-sm">
-            {/* Left: Logo */}
-            <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
-                    PR
-                </div>
-                <div>
-                    <h1 className="text-lg font-bold text-white tracking-tight leading-none">
-                        PhotoRank <span className="text-blue-500">AI</span>
-                    </h1>
-                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider bg-[#1A1A1A] px-1.5 py-0.5 rounded border border-[#262626]">v1.0 Pro</span>
-                </div>
-            </div>
-
-            {/* Middle: Dual Progress */}
-            {total > 0 && (
-                <div className="flex-1 max-w-xl mx-8 flex flex-col gap-2">
-                    {/* Bar 1: Local Processing */}
-                    <div className="flex items-center gap-3 text-xs">
-                        <span className="w-20 text-gray-400 text-right">Preprocessing</span>
-                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
-                            <motion.div
-                                className="h-full bg-blue-500"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${processingProgress}% ` }}
-                                transition={{ ease: "easeInOut" }}
-                            />
-                        </div>
-                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(processingProgress)}%</span>
-                    </div>
-
-                    {/* Bar 2: AI Analysis */}
-                    <div className="flex items-center gap-3 text-xs">
-                        <div className="w-20 flex justify-end">
-                            <span className="text-gray-400 text-right">AI Grading</span>
-                        </div>
-                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
-                            <motion.div
-                                className="h-full bg-purple-500"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${analysisProgress}% ` }}
-                                transition={{ ease: "easeInOut" }}
-                            />
-                        </div>
-                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(analysisProgress)}%</span>
-                    </div>
-                </div>
-            )}
-
-            {/* Pipeline Stats (New) */}
-            {total > 0 && (
-                <div className="mr-6 flex items-center gap-4 text-xs font-mono text-gray-500 border-r border-[#262626] pr-6">
-                    <div className="flex flex-col items-end">
-                        <span className={queueLength > 0 ? "text-yellow-500" : "text-gray-600"}>Queue: {queueLength}</span>
-                        <span className={analyzingCount > 0 ? "text-purple-400 animate-pulse" : "text-gray-600"}>Analyzing: {analyzingCount}</span>
-                        {errorCount > 0 && (
-                            <button
-                                onClick={onRetry}
-                                className="text-red-400 hover:text-red-300 underline decoration-red-500/30 underline-offset-2 transition-colors mt-0.5"
-                            >
-                                Errors: {errorCount} (Retry?)
-                            </button>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* Right: Actions */}
-            <div className="flex items-center gap-3">
-                <button
-                    onClick={onOpenAdmin}
-                    title="Admin Console (Alt+Shift+A)"
-                    className="p-2.5 bg-[#1A1A1A] text-gray-400 border border-[#262626] rounded-xl hover:text-white hover:bg-[#262626] transition-all active:scale-95"
-                >
-                    <Settings size={18} />
-                </button>
-                {supportsFileSystemAccess ? (
-                    <button
-                        onClick={onOpenFolder}
-                        className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-95 duration-100"
-                    >
-                        <FolderOpen size={16} />
-                        Import Folder
-                    </button>
-                ) : (
-                    <div className="text-xs text-gray-500 px-2">
-                        (Drag & Drop supported)
-                    </div>
-                )}
-            </div>
-        </header>
-    );
-}
-</file>
-
 <file path="src/components/ScoreBadge.tsx">
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -792,48 +781,6 @@ export function cn(...inputs: ClassValue[]) {
 .read-the-docs {
   color: #888;
 }
-</file>
-
-<file path="src/gemini.test.ts">
-import { describe, it, expect, vi } from 'vitest';
-import { analyzePhotosBatch } from './lib/gemini';
-
-vi.mock('@google/generative-ai', () => ({
-    GoogleGenerativeAI: class {
-        constructor() { }
-        getGenerativeModel({ model }: { model: string }) {
-            return {
-                generateContent: vi.fn().mockImplementation(async () => {
-                    if (model === 'gemini-2.0-flash-exp') {
-                        throw new Error('404 Model Not Found');
-                    }
-                    if (model === 'gemini-1.5-flash') {
-                        return {
-                            response: {
-                                text: () => JSON.stringify({
-                                    results: [{ score: 9.9, reason: 'Fallback worked' }]
-                                })
-                            }
-                        };
-                    }
-                    throw new Error('Not reached: ' + model);
-                })
-            };
-        }
-    },
-    SchemaType: { OBJECT: 'OBJECT', NUMBER: 'NUMBER', STRING: 'STRING', ARRAY: 'ARRAY' }
-}));
-
-describe('Gemini Fallback Logic (Batch)', () => {
-    it('should fall back to next model if the first one returns 404', async () => {
-        const mockBlob = new Blob(['fake'], { type: 'image/jpeg' });
-        const results = await analyzePhotosBatch([{ id: 'test-1', blob: mockBlob }]);
-
-        expect(results).toHaveLength(1);
-        expect(results[0].score).toBe(9.9);
-        expect(results[0].reason).toBe('Fallback worked');
-    });
-});
 </file>
 
 <file path="src/integration.test.tsx">
@@ -1161,6 +1108,544 @@ export default {
 }
 </file>
 
+<file path="src/components/Header.tsx">
+import { FolderOpen, Settings } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+interface HeaderProps {
+    onOpenFolder: () => void;
+    onOpenAdmin?: () => void;
+    onRetry?: () => void;
+    total: number;
+    processed: number; // Local processing done
+    analyzed: number;  // AI Analysis done
+    queueLength: number;
+    analyzingCount: number;
+    errorCount: number;
+    supportsFileSystemAccess?: boolean;
+}
+
+export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
+    const processingProgress = total > 0 ? (processed / total) * 100 : 0;
+    const analysisProgress = total > 0 ? (analyzed / total) * 100 : 0;
+
+    return (
+        <header className="h-16 px-6 border-b border-[#262626] bg-[#0F0F0F] flex items-center justify-between z-30 relative shadow-sm">
+            {/* Left: Logo */}
+            <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
+                    PR
+                </div>
+                <div>
+                    <h1 className="text-lg font-bold text-white tracking-tight leading-none">
+                        PhotoRank <span className="text-blue-500">AI</span>
+                    </h1>
+                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider bg-[#1A1A1A] px-1.5 py-0.5 rounded border border-[#262626]">v1.0 Pro</span>
+                </div>
+            </div>
+
+            {/* Middle: Dual Progress */}
+            {total > 0 && (
+                <div className="flex-1 max-w-xl mx-8 flex flex-col gap-2">
+                    {/* Bar 1: Local Processing */}
+                    <div className="flex items-center gap-3 text-xs">
+                        <span className="w-20 text-gray-400 text-right">Preprocessing</span>
+                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
+                            <motion.div
+                                className="h-full bg-blue-500"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${processingProgress}% ` }}
+                                transition={{ ease: "easeInOut" }}
+                            />
+                        </div>
+                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(processingProgress)}%</span>
+                    </div>
+
+                    {/* Bar 2: AI Analysis */}
+                    <div className="flex items-center gap-3 text-xs">
+                        <div className="w-20 flex justify-end">
+                            <span className="text-gray-400 text-right">AI Grading</span>
+                        </div>
+                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
+                            <motion.div
+                                className="h-full bg-purple-500"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${analysisProgress}% ` }}
+                                transition={{ ease: "easeInOut" }}
+                            />
+                        </div>
+                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(analysisProgress)}%</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Pipeline Stats (New) */}
+            {total > 0 && (
+                <div className="mr-6 flex items-center gap-4 text-xs font-mono text-gray-500 border-r border-[#262626] pr-6">
+                    <div className="flex flex-col items-end">
+                        <span className={queueLength > 0 ? "text-yellow-500" : "text-gray-600"}>Queue: {queueLength}</span>
+                        <span className={analyzingCount > 0 ? "text-purple-400 animate-pulse" : "text-gray-600"}>Analyzing: {analyzingCount}</span>
+                        {errorCount > 0 && (
+                            <button
+                                onClick={onRetry}
+                                className="text-red-400 hover:text-red-300 underline decoration-red-500/30 underline-offset-2 transition-colors mt-0.5"
+                            >
+                                Errors: {errorCount} (Retry?)
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Right: Actions */}
+            <div className="flex items-center gap-3">
+                <button
+                    onClick={onOpenAdmin}
+                    title="Admin Console (Alt+Shift+A)"
+                    className="p-2.5 bg-[#1A1A1A] text-gray-400 border border-[#262626] rounded-xl hover:text-white hover:bg-[#262626] transition-all active:scale-95"
+                >
+                    <Settings size={18} />
+                </button>
+                {supportsFileSystemAccess ? (
+                    <button
+                        onClick={onOpenFolder}
+                        className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-95 duration-100"
+                    >
+                        <FolderOpen size={16} />
+                        Import Folder
+                    </button>
+                ) : (
+                    <div className="text-xs text-gray-500 px-2">
+                        (Drag & Drop supported)
+                    </div>
+                )}
+            </div>
+        </header>
+    );
+}
+</file>
+
+<file path="src/lib/db.ts">
+import Dexie, { type Table } from 'dexie';
+
+// 定义修图参数的结构
+export interface EditConfig {
+    crop: { x: number; y: number; width: number; height: number }; // 百分比 0.0 - 1.0
+    filters: {
+        brightness: number; // default 1.0
+        contrast: number;   // default 1.0
+        saturate: number;   // default 1.0
+        grayscale: number;  // default 0.0
+        sepia: number;      // default 0.0
+    };
+    predictedScore: number;
+    fixReason: string;
+}
+
+export interface PhotoMetadata {
+    id: string;
+    file?: File;
+    name: string;
+    size: number;
+    type: string;
+    lastModified: number;
+    webkitRelativePath: string; // Keep path for folder structure
+
+    // Blob handling
+    analysisBlob?: Blob;      // Small/Medium JPG (e.g. 1024px) for AI & rapid display
+    previewBlob?: Blob;       // Tiny Thumbnail (e.g. 200px) for Grid
+
+    handle?: FileSystemFileHandle; // For zero-upload access
+
+    // AI Results
+    score?: number;
+    reason?: string;
+    status: 'new' | 'processing' | 'queued' | 'analyzing' | 'scored' | 'error' | 'done';
+
+    createdAt?: number;
+    updatedAt?: number;
+
+    // 新增字段：存储 AI 的修图建议
+    magicEdits?: EditConfig;
+}
+
+export interface LogEntry {
+    id?: number;
+    timestamp: number;
+    level: 'info' | 'warn' | 'error';
+    message: string;
+    details?: unknown;
+}
+
+export class PhotoRankDB extends Dexie {
+    photos!: Table<PhotoMetadata>;
+    logs!: Table<LogEntry>;
+
+    constructor() {
+        super('PhotoRankDB');
+        // 强行提到 25（必须比你之前看到的 21 大）
+        this.version(25).stores({
+            photos: 'id, status, score, createdAt',
+            logs: '++id, timestamp, level'
+        });
+    }
+}
+
+export const db = new PhotoRankDB();
+</file>
+
+<file path="src/lib/logger.ts">
+// Imports removed as unused
+export enum LogLevel {
+    INFO = 'info',
+    WARN = 'warn',
+    ERROR = 'error',
+    SUCCESS = 'success'
+}
+
+export interface LogEntry {
+    id?: number;
+    timestamp: number;
+    level: LogLevel;
+    message: string;
+    details?: unknown;
+}
+
+class LoggerService {
+    async log(level: LogLevel, message: string, details?: unknown) {
+        // const entry: LogEntry = {
+        //     timestamp: Date.now(),
+        //     level,
+        //     message,
+        //     details
+        // };
+
+        // Emit Custom Event for UI
+        if (typeof window !== 'undefined') {
+            const event = new CustomEvent('app-log', {
+                detail: {
+                    time: new Date().toLocaleTimeString(),
+                    level,
+                    msg: message + (details ? ' ' + JSON.stringify(details) : '')
+                }
+            });
+            window.dispatchEvent(event);
+        }
+
+        // Log to console for dev (Silenced for Production Cleanliness)
+        const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
+        console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
+
+        // Persist to DB (Simulated/Optional for now to prevent schema errors if not updated)
+        try {
+            // await db.table('logs').add(entry);
+        } catch (e) {
+            console.error("Failed to write log", e);
+        }
+    }
+
+    info(message: string, details?: unknown) { this.log(LogLevel.INFO, message, details); }
+    success(message: string, details?: unknown) { this.log(LogLevel.SUCCESS, message, details); }
+    warn(message: string, details?: unknown) { this.log(LogLevel.WARN, message, details); }
+    error(message: string, details?: unknown) { this.log(LogLevel.ERROR, message, details); }
+}
+
+export const logger = new LoggerService();
+</file>
+
+<file path="src/workers/imageProcessor.worker.ts">
+/// <reference lib="webworker" />
+
+self.onmessage = async (e: MessageEvent) => {
+    const { id, file } = e.data;
+
+    try {
+        const bitmap = await createImageBitmap(file);
+
+        console.log(`[Worker] Processing ${id}: Start Compression...`);
+
+        // 1. Generate Thumbnail (300px)
+        const thumbBlob = await resizeImage(bitmap, 300);
+
+        // 2. Generate Analysis (1024px)
+        const analysisBlob = await resizeImage(bitmap, 1024);
+
+        console.log(`[Worker] Processing ${id}: Compression Complete. Thumb=${thumbBlob?.size}, Analysis=${analysisBlob?.size}`);
+
+        self.postMessage({
+            id,
+            status: 'success',
+            thumbBlob,
+            analysisBlob
+        });
+
+        bitmap.close();
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        self.postMessage({ id, status: 'error', error: message });
+    }
+};
+
+async function resizeImage(bitmap: ImageBitmap, targetSize: number): Promise<Blob | null> {
+    const scale = Math.min(targetSize / bitmap.width, targetSize / bitmap.height, 1);
+    // If no scaling needed and original is wanted, return original? 
+    // No, we always want consistent formats (e.g. jpeg/webp). 
+    // If scale is 1, we still draw it.
+
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) throw new Error("Could not get canvas context");
+
+    // High quality resize
+    ctx.drawImage(bitmap, 0, 0, width, height);
+
+    return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+}
+
+export { };
+</file>
+
+<file path="src/gemini.test.ts">
+import { describe, it, expect, vi } from 'vitest';
+import { analyzePhotosBatch } from './lib/gemini';
+
+vi.mock('@google/generative-ai', () => ({
+    GoogleGenerativeAI: class {
+        constructor() { }
+        getGenerativeModel({ model }: { model: string }) {
+            return {
+                generateContent: vi.fn().mockImplementation(async () => {
+                    if (model === 'gemini-2.0-flash-exp') {
+                        throw new Error('404 Model Not Found');
+                    }
+                    if (model === 'gemini-1.5-flash') {
+                        return {
+                            response: {
+                                text: () => JSON.stringify({
+                                    results: [{ score: 9.9, reason: 'Fallback worked' }]
+                                })
+                            }
+                        };
+                    }
+                    throw new Error('Not reached: ' + model);
+                })
+            };
+        }
+    },
+    SchemaType: { OBJECT: 'OBJECT', NUMBER: 'NUMBER', STRING: 'STRING', ARRAY: 'ARRAY' }
+}));
+
+describe('Gemini Fallback Logic (Batch)', () => {
+    it('should fall back to next model if the first one returns 404', async () => {
+        const mockBlob = new Blob(['fake'], { type: 'image/jpeg' });
+        const results = await analyzePhotosBatch([{ id: 'test-1', blob: mockBlob }]);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].score).toBe(9.9);
+        expect(results[0].reason).toBe('Fallback worked');
+    });
+});
+</file>
+
+<file path="src/index.css">
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+  /* Force dark mode preference */
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #0f0f0f;
+  /* Deep dark background for Photo App */
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #0f0f0f;
+  color: #fff;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}
+</file>
+
+<file path="src/vite-env.d.ts">
+/// <reference types="vite/client" />
+
+interface Window {
+    showDirectoryPicker(): Promise<FileSystemDirectoryHandle>;
+}
+
+interface FileSystemHandle {
+    kind: 'file' | 'directory';
+    name: string;
+}
+
+interface FileSystemFileHandle extends FileSystemHandle {
+    kind: 'file';
+    getFile(): Promise<File>;
+}
+
+interface FileSystemDirectoryHandle extends FileSystemHandle {
+    kind: 'directory';
+    values(): AsyncIterableIterator<FileSystemHandle>;
+}
+
+// Drag and Drop (Webkit) API types
+interface FileSystemEntry {
+    isFile: boolean;
+    isDirectory: boolean;
+    name: string;
+    fullPath: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    filesystem: any;
+}
+
+interface FileSystemFileEntry extends FileSystemEntry {
+    isFile: true;
+    isDirectory: false;
+    file(successCallback: (file: File) => void, errorCallback?: (error: DOMException) => void): void;
+}
+
+interface FileSystemDirectoryEntry extends FileSystemEntry {
+    isFile: false;
+    isDirectory: true;
+    createReader(): FileSystemDirectoryReader;
+}
+
+interface FileSystemDirectoryReader {
+    readEntries(successCallback: (entries: FileSystemEntry[]) => void, errorCallback?: (error: DOMException) => void): void;
+}
+
+interface DataTransferItem {
+    webkitGetAsEntry(): FileSystemEntry | null;
+}
+</file>
+
+<file path=".gitignore">
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Production / Build
+dist
+build
+
+# Environment Variables (CRITICAL!)
+.env
+.env.local
+.env.*.local
+
+# Debug logs & Temp files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.node_modules/.tmp
+tsconfig.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+</file>
+
+<file path="README.md">
+# PhotoRank AI 📸
+
+**AI-Powered Professional Photo Culling & Aesthetic Scoring Tool**
+
+PhotoRank AI is a high-performance web application designed for photographers to automate the tedious process of selecting the best shots from thousands of images.
+
+### ✨ Key Features
+- **Privacy-First**: All image compression and processing happen locally in your browser via Web Workers and IndexedDB.
+- **AI Aesthetic Scoring**: Uses Google Gemini Pro Vision to provide multi-dimensional scoring (composition, lighting, technical quality).
+- **Industrial Performance**: Handles large batches of high-res photos without freezing the UI.
+- **Offline Persistent**: Your ratings and progress are saved locally in the browser.
+
+### 🛠️ Tech Stack
+- **Framework**: React 19 + Vite 7 (Latest)
+- **Intelligence**: Google Gemini API
+- **Storage**: Dexie.js (IndexedDB)
+- **Animation**: Framer Motion
+- **Styling**: Tailwind CSS
+
+### 🚀 Getting Started
+1. **Clone the repo**: `git clone https://github.com/Shadyupup/PhotoRank-AI.git`
+2. **Install**: `npm install`
+3. **Set up API Key**: Create a `.env` file and add `VITE_GEMINI_API_KEY=your_key_here`
+4. **Run**: `npm run dev`
+</file>
+
+<file path="vite.config.ts">
+/// <reference types="vitest" />
+import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
+import path from 'path'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  server: {
+    headers: {
+      // "Cross-Origin-Opener-Policy": "same-origin",
+      // "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+  },
+  optimizeDeps: {
+    exclude: ['@google/generative-ai'],
+  },
+  test: {
+    environment: 'happy-dom',
+    globals: true
+  }
+})
+</file>
+
 <file path="src/components/PhotoCard.tsx">
 import { useEffect, useState, memo } from 'react';
 import { PhotoMetadata } from '@/lib/db';
@@ -1193,10 +1678,15 @@ export const PhotoCard = memo(({ photo, style, className, selected, onToggleSele
     return (
         <motion.div
             layout
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.3 }}
+            exit={{ opacity: 0, scale: 0.5 }}
+            transition={{
+                type: "spring",
+                stiffness: 300,
+                damping: 25,
+                layout: { duration: 0.4 }
+            }}
             style={style}
             className={cn("relative group", className)}
         >
@@ -1267,70 +1757,142 @@ export const PhotoCard = memo(({ photo, style, className, selected, onToggleSele
 
 <file path="src/components/PhotoDetailModal.tsx">
 import { useEffect, useState } from 'react';
-import { PhotoMetadata } from '@/lib/db';
-import { X, Sparkles } from 'lucide-react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db, PhotoMetadata, EditConfig } from '@/lib/db';
+import { X, Sparkles, Wand2, ArrowLeftRight, Crop, ScanEye, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { generateMagicFixConfig } from '@/lib/gemini';
+import { logger } from '@/lib/logger';
+import { toast } from 'sonner';
+import { useAutoOptimizer } from '@/hooks/useAutoOptimizer';
 
 interface PhotoDetailModalProps {
-    photo: PhotoMetadata;
+    photoId: string;
     onClose: () => void;
 }
 
-export function PhotoDetailModal({ photo, onClose }: PhotoDetailModalProps) {
+export function PhotoDetailModal({ photoId, onClose }: PhotoDetailModalProps) {
+    // --- 所有 Hooks 都放在最顶层 ---
+    const photo = useLiveQuery(() => db.photos.get(photoId), [photoId]);
+    const { startOptimization, isOptimizing } = useAutoOptimizer();
     const [src, setSrc] = useState<string | null>(null);
+    const [isFixing, setIsFixing] = useState(false);
+    const [activeEdits, setActiveEdits] = useState<EditConfig | undefined>(undefined);
+    const [isComparing, setIsComparing] = useState(false);
 
     useEffect(() => {
+        if (photo) {
+            setActiveEdits(photo.magicEdits);
+        }
+    }, [photo?.magicEdits]);
+
+    // 加载图片 URL 的 Hook
+    useEffect(() => {
+        // 如果 photo 还不存在，就什么都不做
+        if (!photo) {
+            setSrc(null); // 确保在切换图片时重置
+            return;
+        };
+
         let activeUrl = '';
         let cancelled = false;
 
         const loadContent = async () => {
             try {
-                // 1. Try Analysis Blob (High Res Cache - fastest if available)
                 if (photo.analysisBlob) {
                     activeUrl = URL.createObjectURL(photo.analysisBlob);
-                    if (!cancelled) setSrc(activeUrl);
-                    return;
-                }
-
-                // 2. Try Original File Object (RAM - fastest source)
-                if (photo.file) {
+                } else if (photo.file) {
                     activeUrl = URL.createObjectURL(photo.file);
-                    if (!cancelled) setSrc(activeUrl);
-                    return;
-                }
-
-                // 3. Try File System Handle (Disk - fast but async)
-                if (photo.handle) {
-                    try {
-                        const file = await photo.handle.getFile();
-                        activeUrl = URL.createObjectURL(file);
-                        if (!cancelled) setSrc(activeUrl);
-                        return;
-                    } catch (err) {
-                        console.warn("Failed to read from handle", err);
-                        // Fall through
-                    }
-                }
-
-                // 4. Fallback to Preview (Low Res Cache - always available)
-                if (photo.previewBlob) {
+                } else if (photo.handle) {
+                    const file = await photo.handle.getFile();
+                    activeUrl = URL.createObjectURL(file);
+                } else if (photo.previewBlob) {
                     activeUrl = URL.createObjectURL(photo.previewBlob);
-                    if (!cancelled) setSrc(activeUrl);
+                }
+
+                if (!cancelled) {
+                    setSrc(activeUrl);
                 }
             } catch (e) {
                 console.error("Failed to load image content", e);
             }
         };
 
-        setSrc(null); // Reset while loading
+        setSrc(null); // 每次 photo 变化都先重置
         loadContent();
 
         return () => {
             cancelled = true;
             if (activeUrl) URL.revokeObjectURL(activeUrl);
         };
-    }, [photo]);
+    }, [photo]); // 依赖 photo 对象本身
 
+
+    // --- FIX: 把条件判断移到渲染逻辑中 ---
+    if (!photo) {
+        // 仍然显示加载状态，但不再是提前返回
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md">
+                <Loader2 className="animate-spin text-white" size={48} />
+            </div>
+        );
+    }
+
+    // --- 在这里，可以安全地假设 photo 已经存在 ---
+    const handleMagicFix = async () => {
+        if (!photo.reason) return toast.error("No feedback available for AI to work with.");
+
+        setIsFixing(true);
+        const toastId = toast.loading("AI is re-composing and color grading...");
+
+        try {
+            const sourceBlob = photo.analysisBlob || photo.previewBlob || (photo.file ? new Blob([photo.file], { type: photo.file.type }) : null);
+            if (!sourceBlob) throw new Error("No source image found.");
+
+            const config = await generateMagicFixConfig(sourceBlob, photo.reason);
+
+            await db.photos.update(photo.id, {
+                magicEdits: config,
+                updatedAt: Date.now()
+            });
+
+            setActiveEdits(config); // 更新本地状态以立即显示
+            toast.success(`Fixed! Predicted Score: ${config.predictedScore}`, { id: toastId });
+
+        } catch (error) {
+            toast.error("Magic Fix Failed: " + (error as Error).message, { id: toastId });
+        } finally {
+            setIsFixing(false);
+        }
+    };
+
+    // 计算 CSS 样式的函数 (保持不变)
+    const getEditStyles = () => {
+        if (!activeEdits || isComparing) {
+            return { container: {}, img: { filter: 'none', transform: 'none' } };
+        }
+        const { crop, filters } = activeEdits;
+        const cropCenterX = crop.x + crop.width / 2;
+        const cropCenterY = crop.y + crop.height / 2;
+        const translateX = (0.5 - cropCenterX) * 100;
+        const translateY = (0.5 - cropCenterY) * 100;
+        const scale = 1 / Math.max(crop.width, crop.height);
+
+        return {
+            container: { overflow: 'hidden' },
+            img: {
+                filter: `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturate}) sepia(${filters.sepia || 0})`,
+                transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
+                transformOrigin: 'center center',
+                transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)'
+            }
+        };
+    };
+
+    const styles = getEditStyles();
+    const currentScore = (activeEdits && !isComparing) ? activeEdits.predictedScore : photo.score;
+
+    // --- 返回完整的 JSX ---
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-6" onClick={onClose}>
             <div
@@ -1338,16 +1900,48 @@ export function PhotoDetailModal({ photo, onClose }: PhotoDetailModalProps) {
                 onClick={e => e.stopPropagation()}
             >
                 {/* Image Section */}
-                <div className="flex-1 bg-[#050505] flex items-center justify-center p-4 relative">
+                <div className="flex-1 bg-[#050505] flex items-center justify-center p-4 relative overflow-hidden">
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent pointer-events-none" />
-                    {src ? (
-                        <img
-                            src={src}
-                            alt={photo.name}
-                            className="max-w-full max-h-full object-contain shadow-2xl rounded-lg"
-                        />
-                    ) : (
-                        <div className="text-gray-500 animate-pulse">Loading high-res image...</div>
+
+                    {/* Viewport Container */}
+                    <div className="w-full h-full flex items-center justify-center" style={styles.container}>
+                        {src ? (
+                            <img
+                                src={src}
+                                alt={photo.name}
+                                className="max-w-full max-h-full object-contain shadow-2xl rounded-lg will-change-transform"
+                                style={styles.img}
+                            />
+                        ) : (
+                            <div className="text-gray-500 animate-pulse">Loading image...</div>
+                        )}
+                    </div>
+
+                    {/* Compare Button Overlay */}
+                    {activeEdits && (
+                        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-20">
+                            <button
+                                onMouseDown={() => setIsComparing(true)}
+                                onMouseUp={() => setIsComparing(false)}
+                                onMouseLeave={() => setIsComparing(false)}
+                                className="flex items-center gap-2 px-6 py-2 bg-black/60 backdrop-blur-md border border-white/20 rounded-full text-white font-bold hover:bg-black/80 transition-all active:scale-95 select-none"
+                            >
+                                <ArrowLeftRight size={16} />
+                                {isComparing ? 'Showing Original' : 'Hold to Compare'}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Magic Fix Indicator */}
+                    {activeEdits && !isComparing && (
+                        <div className="absolute top-6 left-6 flex flex-col gap-2 pointer-events-none">
+                            <div className="flex items-center gap-2 px-3 py-1 bg-purple-500/20 border border-purple-500/30 text-purple-200 text-xs rounded-full backdrop-blur-md">
+                                <Crop size={12} /> Re-composed
+                            </div>
+                            <div className="flex items-center gap-2 px-3 py-1 bg-blue-500/20 border border-blue-500/30 text-blue-200 text-xs rounded-full backdrop-blur-md">
+                                <ScanEye size={12} /> Color Graded
+                            </div>
+                        </div>
                     )}
                 </div>
 
@@ -1355,55 +1949,97 @@ export function PhotoDetailModal({ photo, onClose }: PhotoDetailModalProps) {
                 <div className="w-full md:w-[400px] bg-[#0F0F0F] flex flex-col border-l border-[#262626]">
                     {/* Header */}
                     <div className="p-6 border-b border-[#262626] flex justify-between items-start bg-[#161616]">
-                        <div className="overflow-hidden">
-                            <h2 className="text-xl font-bold text-white truncate mb-1" title={photo.name}>{photo.name}</h2>
+                        <div className="overflow-hidden mr-4">
+                            <h2 className="text-xl font-bold text-white truncate">{photo.name}</h2>
                             <p className="text-xs text-gray-500 font-mono">{photo.status === 'scored' ? 'Analyzed' : 'Processing...'}</p>
                         </div>
-                        <button
-                            onClick={onClose}
-                            className="p-2 hover:bg-[#262626] rounded-lg transition-colors text-gray-400 hover:text-white"
-                        >
-                            <X size={20} />
-                        </button>
+                        <div className="flex items-center gap-2">
+                            {/* 自动化迭代按钮 (Golden Loop) */}
+                            <button
+                                onClick={() => startOptimization(photo)}
+                                disabled={isOptimizing}
+                                className={cn(
+                                    "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border",
+                                    "bg-gradient-to-r from-yellow-500/20 to-orange-500/20 border-yellow-500/50 text-yellow-200 hover:bg-yellow-500/30",
+                                    isOptimizing ? "opacity-80 cursor-not-allowed" : "hover:scale-105 active:scale-95"
+                                )}
+                            >
+                                {isOptimizing ? (
+                                    <>
+                                        <Loader2 size={14} className="animate-spin" />
+                                        <span>Looping...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Sparkles size={14} className="text-yellow-400" />
+                                        <span>Auto Masterpiece</span>
+                                    </>
+                                )}
+                            </button>
+
+                            <button
+                                onClick={handleMagicFix}
+                                disabled={isFixing}
+                                className={cn(
+                                    "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                    "bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:shadow-lg hover:shadow-purple-500/20 active:scale-95",
+                                    isFixing && "opacity-50 cursor-not-allowed grayscale"
+                                )}
+                            >
+                                <Wand2 size={14} className={cn(isFixing && "animate-spin")} />
+                                {activeEdits ? 'Re-Fix' : 'Magic Fix'}
+                            </button>
+                            <button onClick={onClose} className="p-2 hover:bg-[#262626] rounded-lg text-gray-400 hover:text-white transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
                     </div>
 
                     {/* Content */}
                     <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
                         {/* Score Card */}
                         <div className="flex flex-col items-center justify-center p-8 rounded-2xl bg-[#1A1A1A] border border-[#262626] shadow-inner relative overflow-hidden group">
-                            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5 opacity-50" />
+                            <div className={cn(
+                                "absolute inset-0 bg-gradient-to-br opacity-50 transition-colors duration-500",
+                                activeEdits && !isComparing ? "from-purple-500/20 to-blue-500/20" : "from-gray-500/5 to-gray-500/5"
+                            )} />
 
-                            {/* Giant Score */}
                             <div className="relative z-10 flex flex-col items-center">
                                 <span className={cn(
-                                    "text-6xl font-black tracking-tighter mb-2 bg-clip-text text-transparent bg-gradient-to-br",
-                                    (photo.score || 0) >= 9 ? "from-green-400 to-emerald-600" :
-                                        (photo.score || 0) >= 7 ? "from-blue-400 to-indigo-600" :
-                                            (photo.score || 0) >= 5 ? "from-orange-400 to-red-600" : "from-red-400 to-red-700"
+                                    "text-6xl font-black tracking-tighter mb-2 bg-clip-text text-transparent bg-gradient-to-br transition-all duration-300",
+                                    (currentScore || 0) >= 9 ? "from-green-400 to-emerald-600" :
+                                        (currentScore || 0) >= 7 ? "from-blue-400 to-indigo-600" :
+                                            "from-orange-400 to-red-600",
+                                    isComparing && "opacity-50 grayscale"
                                 )}>
-                                    {photo.score ? photo.score.toFixed(1) : 'N/A'}
+                                    {currentScore ? currentScore.toFixed(1) : 'N/A'}
                                 </span>
                                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-semibold text-gray-400 uppercase tracking-widest">
-                                    <Sparkles size={12} className="text-blue-400" /> Aesthetic Score
+                                    <Sparkles size={12} className={cn(activeEdits && !isComparing ? "text-purple-400" : "text-blue-400")} />
+                                    {activeEdits && !isComparing ? 'AI Improved' : 'Original Score'}
                                 </div>
                             </div>
                         </div>
 
-                        {/* Analysis */}
+                        {/* Feedback / Fix Reason */}
                         <div>
                             <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-4 flex items-center gap-2">
                                 <span className="w-1 h-4 bg-purple-500 rounded-full" />
-                                Gemini Evaluation
+                                {activeEdits ? 'Magic Fix Details' : 'Gemini Evaluation'}
                             </h3>
                             <div className="bg-[#1A1A1A] rounded-xl p-5 border border-[#262626] text-sm leading-relaxed text-gray-300 shadow-sm relative">
-                                {photo.reason ? (
+                                {activeEdits ? (
                                     <>
-                                        <p className="font-serif italic text-gray-400 mb-2 opacity-50 text-2xl absolute top-2 left-3">"</p>
-                                        <p className="relative z-10 px-2">{photo.reason}</p>
-                                        <p className="font-serif italic text-gray-400 mt-2 opacity-50 text-2xl absolute bottom-0 right-4">"</p>
+                                        <p className="text-purple-300 font-medium mb-2">✨ Applied Enhancements:</p>
+                                        <p>{activeEdits.fixReason}</p>
+                                        <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-500 font-mono">
+                                            <div>Bright: {activeEdits.filters.brightness}x</div>
+                                            <div>Contrast: {activeEdits.filters.contrast}x</div>
+                                            <div>Crop: {Math.round(activeEdits.crop.width * 100)}% Area</div>
+                                        </div>
                                     </>
                                 ) : (
-                                    <span className="text-gray-600 italic">Analysis pending or unavailable.</span>
+                                    <p>{photo.reason || "Analysis pending..."}</p>
                                 )}
                             </div>
                         </div>
@@ -1456,6 +2092,7 @@ export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView }: Photo
                 style={{ height: '100%' }}
                 totalCount={photos.length}
                 data={photos}
+                computeItemKey={(index, item) => item.id}
                 components={{
                     List: forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ style, children, ...props }, ref) => (
                         <div
@@ -1610,45 +2247,73 @@ export function useAIPipeline() {
                     logger.info(`Pipeline: Starting batch analysis for ${tasks.length} photos: [${taskIds.join(', ')}]`);
 
                     // Execute logic inline (awaiting it)
-                    // Execute logic inline (awaiting it)
-                    const items = tasks.map(t => ({ id: t.id, blob: t.analysisBlob })).filter((item): item is { id: string, blob: Blob } => !!item.blob);
+                    // 1. Separate valid items from invalid ones (missing blob or size 0)
+                    const validItems: { id: string, blob: Blob }[] = [];
+                    const invalidIds: string[] = [];
 
-                    if (items.length !== tasks.length) throw new Error("Missing analysis data for some task");
+                    tasks.forEach(t => {
+                        if (t.analysisBlob && t.analysisBlob.size > 0) {
+                            validItems.push({ id: t.id, blob: t.analysisBlob });
+                        } else {
+                            invalidIds.push(t.id);
+                        }
+                    });
 
-                    const results = await analyzePhotosBatch(items);
-                    logger.info("AI 返回结果数组:", results);
-
-                    // Create a Map for O(1) Lookup by ID
-                    const resultMap = new Map(results.map(r => [r.file_id, r]));
-
-                    if (results.length !== tasks.length) {
-                        logger.error(`Batch mismatch: Sent ${tasks.length}, Got ${results.length}. Handling individual items...`);
-                    }
-
-                    // Critical: Always save results even if component unmounted (Zombie process handling)
-                    await db.transaction('rw', db.photos, async () => {
-                        for (let i = 0; i < tasks.length; i++) {
-                            const task = tasks[i];
-                            const res = resultMap.get(task.id);
-
-                            if (res) {
-                                await db.photos.update(task.id, {
-                                    score: parseFloat(String(res.score)) || 0, // 强转为浮点数
-                                    reason: res.reason || "无理由",
-                                    status: 'scored',
-                                    analysisBlob: undefined, // Free up space!
-                                    updatedAt: Date.now()
-                                });
-                            } else {
-                                logger.warn(`Missing result for ID: ${task.id} - Re-queuing`);
-                                await db.photos.update(task.id, {
-                                    status: 'queued',
+                    // 2. Handle Invalid Items immediately (Mark as Error)
+                    if (invalidIds.length > 0) {
+                        logger.error(`Pipeline: Found ${invalidIds.length} tasks with missing/empty image data. Marking as error.`);
+                        await db.transaction('rw', db.photos, async () => {
+                            for (const id of invalidIds) {
+                                await db.photos.update(id, {
+                                    status: 'error',
+                                    reason: 'Image data lost or corrupted (0 bytes)',
                                     updatedAt: Date.now()
                                 });
                             }
+                        });
+                    }
+
+                    // 3. Process Valid Items
+                    if (validItems.length > 0) {
+                        try {
+                            const results = await analyzePhotosBatch(validItems);
+                            logger.info("AI 返回结果数组:", results);
+
+                            // Create a Map for O(1) Lookup by ID
+                            const resultMap = new Map(results.map(r => [r.file_id, r]));
+
+                            await db.transaction('rw', db.photos, async () => {
+                                for (const item of validItems) {
+                                    const res = resultMap.get(item.id);
+
+                                    if (res) {
+                                        await db.photos.update(item.id, {
+                                            score: parseFloat(String(res.score)) || 0,
+                                            reason: res.reason || "无理由",
+                                            status: 'scored',
+                                            analysisBlob: undefined, // Free up space!
+                                            updatedAt: Date.now()
+                                        });
+                                    } else {
+                                        logger.warn(`Missing result for ID: ${item.id} - Re-queuing`);
+                                        await db.photos.update(item.id, {
+                                            status: 'queued',
+                                            updatedAt: Date.now()
+                                        });
+                                    }
+                                }
+                            });
+                            logger.success(`Pipeline: Successfully scored batch of ${validItems.length}`);
+                        } catch (err) {
+                            // If the batch API call fails, we should probably retry later or mark as error
+                            // For now, letting the outer catch handle it (which keeps them in 'analyzing' until watchdog resets them) is okay,
+                            // OR we can explicitly reset them to queued.
+                            logger.error("Batch Analysis Failed", err);
+                            throw err; // Re-throw to trigger outer catch
                         }
-                    });
-                    logger.success(`Pipeline: Successfully scored batch of ${tasks.length}`);
+                    } else {
+                        logger.warn("Pipeline: No valid items to process in this batch.");
+                    }
                     logger.info(`Pipeline: DB Update Verified. notifying UI...`);
                 }
             }
@@ -1736,8 +2401,10 @@ export function useDirectoryLoader() {
                         const fileHandle = entry as FileSystemFileHandle;
                         // Filter for images with extended format support (Added .dng)
                         if (/\.(jpg|jpeg|png|webp|avif|dng)$/i.test(entry.name)) {
+                            // 使用 randomUUID 确保唯一性，避免 React Key 冲突
+                            const uniqueId = `file-${crypto.randomUUID()}`;
                             entries.push({
-                                id: relativePath,
+                                id: uniqueId,
                                 handle: fileHandle,
                                 name: entry.name,
                                 path: relativePath
@@ -1789,7 +2456,8 @@ export function useDirectoryLoader() {
             const skipped = originalCount - validFiles.length;
 
             const entries: FileEntry[] = validFiles.map(f => ({
-                id: `drop-${Date.now()}-${f.name}`,
+                // 修复：使用 randomUUID 防止批量拖入时 ID 重复 (Date.now() 在循环中可能相同)
+                id: `drop-${crypto.randomUUID()}`,
                 file: f,
                 name: f.name,
                 path: f.name
@@ -1819,61 +2487,10 @@ export function useDirectoryLoader() {
 }
 </file>
 
-<file path="src/lib/db.ts">
-import Dexie, { type Table } from 'dexie';
-
-export interface PhotoMetadata {
-    id: string; // Unique path
-    name: string;
-    path: string; // Relative path
-    size: number;
-    handle?: FileSystemFileHandle;
-
-    // Generated Content
-    previewBlob?: Blob;
-    analysisBlob?: Blob; // 1024px version
-
-    // AI Results
-    score?: number;
-    reason?: string;
-
-    file?: File; // Store direct File object for dropped files (supported by IndexedDB)
-    // Meta
-    status: 'new' | 'processing' | 'done' | 'queued' | 'analyzing' | 'scored' | 'error';
-    width?: number;
-    height?: number;
-    createdAt: number;
-    updatedAt?: number;
-}
-
-export interface LogEntry {
-    id?: number;
-    timestamp: number;
-    level: 'info' | 'warn' | 'error';
-    message: string;
-    details?: unknown;
-}
-
-export class PhotoRankDB extends Dexie {
-    photos!: Table<PhotoMetadata>;
-    logs!: Table<LogEntry>;
-
-    constructor() {
-        super('PhotoRankDB');
-        // 强行提到 25（必须比你之前看到的 21 大）
-        this.version(25).stores({
-            photos: 'id, status, score, createdAt',
-            logs: '++id, timestamp, level'
-        });
-    }
-}
-
-export const db = new PhotoRankDB();
-</file>
-
 <file path="src/lib/gemini.ts">
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType, Part } from "@google/generative-ai";
 import { logger } from "./logger";
+import { EditConfig } from "./db";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
@@ -1927,9 +2544,7 @@ const batchSchema = {
 const MODELS = [
     "gemini-3-flash-preview", // User requested newest model
     "gemini-2.0-flash",     // Stable fast model
-    "gemini-2.5-flash",     // Newer fast model
-    "gemini-2.0-flash-exp", // Experimental
-    "gemini-2.5-pro",       // High quality fallback
+    "gemini-1.5-pro",       // High quality fallback
 ];
 
 async function tryGenerate(modelName: string, items: { id: string, data: string, mimeType: string }[], signal?: AbortSignal) {
@@ -1994,11 +2609,25 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
     if (!API_KEY) throw new Error("API Key not found");
     if (signal?.aborted) throw new Error("Aborted");
 
-    const images = await Promise.all(items.map(async item => ({
-        id: item.id,
-        data: await blobToBase64(item.blob),
-        mimeType: "image/jpeg"
-    })));
+    // Validate blobs before processing
+    const validItems = items.filter(i => i.blob.size > 0);
+    if (validItems.length < items.length) {
+        logger.warn(`Skipped ${items.length - validItems.length} empty blobs in batch`);
+    }
+    if (validItems.length === 0) throw new Error("No valid image data to analyze");
+
+    const images = await Promise.all(validItems.map(async item => {
+        const b64 = await blobToBase64(item.blob);
+        if (!b64 || b64.length === 0) {
+            logger.error(`Failed to convert blob to base64 for ID: ${item.id}. Blob size: ${item.blob.size}, type: ${item.blob.type}`);
+            throw new Error(`Base64 conversion failed for ${item.id}`);
+        }
+        return {
+            id: item.id,
+            data: b64,
+            mimeType: item.blob.type || "image/jpeg" // Ensure mimeType is present
+        };
+    }));
 
     let lastError;
 
@@ -2006,8 +2635,9 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
         if (signal?.aborted) throw new Error("Aborted");
 
         try {
-            logger.info(`Attempting analysis with model: ${modelName}`);
+            logger.info(`Attempting analysis with model: ${modelName}. Payload size: ${images.reduce((acc, img) => acc + img.data.length, 0)} chars`);
             const result = await tryGenerate(modelName, images, signal);
+            // ... Rest of function unchanged until end of loop ...
 
             logger.info(`Raw response received. Extracting text...`);
             const text = result.response.text();
@@ -2057,17 +2687,196 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
 }
 
 
-function blobToBase64(blob: Blob): Promise<string> {
+function base64ToBlob(base64: string, mimeType: string): Blob {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+}
+
+export function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
+        if (!blob || blob.size === 0) {
+            return reject(new Error("Blob is empty or null"));
+        }
         const reader = new FileReader();
         reader.onloadend = () => {
             const dataUrl = reader.result as string;
-            const base64 = dataUrl.split(',')[1];
-            resolve(base64);
+            if (!dataUrl) {
+                return reject(new Error("FileReader result is empty"));
+            }
+            const parts = dataUrl.split(',');
+            if (parts.length < 2) {
+                return reject(new Error("Invalid Data URL format"));
+            }
+            resolve(parts[1]);
         };
-        reader.onerror = reject;
+        reader.onerror = (e) => reject(new Error("FileReader error: " + e));
         reader.readAsDataURL(blob);
     });
+}
+
+export async function generateMagicFixConfig(blob: Blob, improvementReason: string): Promise<EditConfig> {
+    if (!API_KEY) throw new Error("API Key not found");
+
+    const modelName = "gemini-2.0-flash"; // Flash 模型处理 JSON 很强且快
+    const model = getGenAI().getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+            responseMimeType: "application/json", // 强制返回 JSON
+        },
+    });
+
+    const base64Image = await blobToBase64(blob);
+
+    const prompt = `
+        Act as a world-class professional photo editor.
+        The user wants to improve this photo based on: "${improvementReason}".
+        
+        Your Goal: Re-edit this photo to achieve an aesthetic score of 9.0+.
+
+        Tasks:
+        1. **Composition (Crop)**: Suggest a crop to improve composition (Rule of Thirds, Golden Ratio). Remove distracting edges.
+        2. **Color Grading (CSS Filters)**: Adjust lighting and color.
+           - brightness: 1.0 is normal. Range 0.5 to 1.5.
+           - contrast: 1.0 is normal. Range 0.5 to 1.5.
+           - saturate: 1.0 is normal. Range 0.0 (B&W) to 2.0 (Vibrant).
+           - sepia: 0.0 to 1.0 (only if vintage style fits).
+        
+        RETURN JSON ONLY with this structure:
+        {
+            "crop": { "x": 0.0-0.5, "y": 0.0-0.5, "width": 0.5-1.0, "height": 0.5-1.0 },
+            "filters": { "brightness": number, "contrast": number, "saturate": number, "sepia": number },
+            "predictedScore": number (8.0 to 10.0),
+            "fixReason": "Short explanation of what you changed."
+        }
+    `;
+
+    try {
+        const result = await model.generateContent([
+            prompt,
+            { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+        ]);
+
+        const text = result.response.text();
+        const config = JSON.parse(text) as EditConfig;
+
+        // 简单的校验
+        if (!config.crop || !config.filters) throw new Error("AI returned incomplete config");
+
+        return config;
+
+    } catch (error) {
+        logger.error("Magic Fix Calculation Failed", error);
+        throw error;
+    }
+}
+
+async function generateImageInternal(modelName: string, blob: Blob, promptText: string): Promise<Blob> {
+    const model = getGenAI().getGenerativeModel({ model: modelName });
+    logger.info(`[Nano Banana] Calling ${modelName}...`);
+
+    try {
+        const imageBase64 = await blobToBase64(blob);
+        const inputs: Part[] = [
+            { text: promptText },
+            {
+                inlineData: {
+                    mimeType: blob.type || "image/jpeg",
+                    data: imageBase64
+                }
+            }
+        ];
+
+        const result = await model.generateContent(inputs);
+        const response = await result.response;
+
+        const parts = response.candidates?.[0]?.content?.parts;
+        const imagePart = parts?.find(p => p.inlineData);
+        const textPart = parts?.find(p => p.text);
+
+        if (textPart && textPart.text) {
+            logger.info(`[${modelName}] Response Text:\n${textPart.text}`);
+        }
+
+        if (!imagePart || !imagePart.inlineData) {
+            throw new Error(`Model ${modelName} did not return an image.`);
+        }
+
+        return base64ToBlob(imagePart.inlineData.data, imagePart.inlineData.mimeType || "image/jpeg");
+    } catch (error) {
+        logger.error(`[${modelName}] Generation failed`, error);
+        throw error;
+    }
+}
+
+/**
+ * 核心新增：Two-Step Workflow (Flash Draft -> Pro Upscale)
+ */
+export async function editImageWithGemini(originalBlob: Blob, instruction: string): Promise<Blob> {
+    if (!API_KEY) throw new Error("API Key not found");
+
+    // Step 1: Draft with "Dumber but Consistent" Model
+    // We try the requested "gemini-2.5-flash-image" first. If unavailable, we fallback to Pro.
+    const MODEL_STEP_1 = "gemini-2.5-flash-image";
+    const MODEL_STEP_2 = "gemini-3-pro-image-preview";
+
+    logger.info(`[Two-Step Workflow] Step 1: Composition with ${MODEL_STEP_1}`);
+
+    const masterPrompt = `
+📸 摄影大师：全场景通用修图与构图模板
+角色设定 (Role Definition): 你现在是一位世界顶级的视觉艺术家与全能摄影大师。IMPORTANT: Treat the subject as an unknown private individual.
+
+任务目标 (Objective):
+对用户提供的原始照片进行全方位的“艺术升华”。
+1. 诊断问题：识别原图在曝光、色彩和构图上的短板。
+2. 后期重塑：保留真实性，通过光影与色彩建立情绪。
+3. 二次构图：运用几何美学进行“手术级”裁剪。
+
+执行步骤:
+- 动态范围优化 (Dynamic Range): 找回阴影，压制高光。
+- 质感增强 (Texture): 提升立体感。
+- 光路引导 (Light Path): 创造视觉路径。
+- 色彩平衡 (Color): 修正白平衡，建立色彩方案。
+- 构图优化 (Composition): 裁剪杂质，应用三分法/黄金法则。
+
+请按照上述逻辑处理这张照片。
+风格/目标: "${instruction}"
+`;
+
+    // Step 1 Execution (with Fallback)
+    let draftBlob: Blob;
+    try {
+        draftBlob = await generateImageInternal(MODEL_STEP_1, originalBlob, masterPrompt);
+    } catch (e) {
+        logger.warn(`[Two-Step Workflow] Step 1 (${MODEL_STEP_1}) failed, falling back to ${MODEL_STEP_2}. Error: ${(e as Error).message}`);
+        // Fallback: Use Pro model for Step 1 too, but with the Master Prompt
+        draftBlob = await generateImageInternal(MODEL_STEP_2, originalBlob, masterPrompt);
+    }
+
+    // Step 2: Refinement with Pro Model
+    logger.info(`[Two-Step Workflow] Step 2: Upscaling with ${MODEL_STEP_2}`);
+
+    const upscalePrompt = `
+    Role: High-End Image Restoration & Upscaling Specialist.
+    Task: Take the provided input image (which is a rough draft) and transform it into a high-fidelity, high-resolution masterpiece.
+    
+    Guidelines:
+    1. **Strict Fidelity**: Maintain the EXACT composition, lighting, and color grading of the input image. Do not change the subject or the scene layout.
+    2. **Detail Enhancement**: Sharpen textures (skin, fabric, foliage, architecture). Remove digital noise/artifacts from the draft.
+    3. **Upscale**: Generate the output at high resolution with crisp edges.
+    
+    Input Image serves as the strict reference. Refine it to professional commercial quality.
+    `;
+
+    // Step 2 Execution
+    const finalBlob = await generateImageInternal(MODEL_STEP_2, draftBlob, upscalePrompt);
+
+    logger.success(`[Two-Step Workflow] Complete!`);
+    return finalBlob;
 }
 
 export async function testGeminiConnection(): Promise<string> {
@@ -2110,121 +2919,6 @@ export async function testGeminiConnection(): Promise<string> {
 }
 </file>
 
-<file path="src/lib/logger.ts">
-// Imports removed as unused
-export enum LogLevel {
-    INFO = 'info',
-    WARN = 'warn',
-    ERROR = 'error',
-    SUCCESS = 'success'
-}
-
-export interface LogEntry {
-    id?: number;
-    timestamp: number;
-    level: LogLevel;
-    message: string;
-    details?: unknown;
-}
-
-class LoggerService {
-    async log(level: LogLevel, message: string, details?: unknown) {
-        // const entry: LogEntry = {
-        //     timestamp: Date.now(),
-        //     level,
-        //     message,
-        //     details
-        // };
-
-        // Emit Custom Event for UI
-        if (typeof window !== 'undefined') {
-            const event = new CustomEvent('app-log', {
-                detail: {
-                    time: new Date().toLocaleTimeString(),
-                    level,
-                    msg: message + (details ? ' ' + JSON.stringify(details) : '')
-                }
-            });
-            window.dispatchEvent(event);
-        }
-
-        // Log to console for dev (Silenced for Production Cleanliness)
-        const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
-        console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
-
-        // Persist to DB (Simulated/Optional for now to prevent schema errors if not updated)
-        try {
-            // await db.table('logs').add(entry);
-        } catch (e) {
-            console.error("Failed to write log", e);
-        }
-    }
-
-    info(message: string, details?: unknown) { this.log(LogLevel.INFO, message, details); }
-    success(message: string, details?: unknown) { this.log(LogLevel.SUCCESS, message, details); }
-    warn(message: string, details?: unknown) { this.log(LogLevel.WARN, message, details); }
-    error(message: string, details?: unknown) { this.log(LogLevel.ERROR, message, details); }
-}
-
-export const logger = new LoggerService();
-</file>
-
-<file path="src/workers/imageProcessor.worker.ts">
-/// <reference lib="webworker" />
-
-self.onmessage = async (e: MessageEvent) => {
-    const { id, file } = e.data;
-
-    try {
-        const bitmap = await createImageBitmap(file);
-
-        console.log(`[Worker] Processing ${id}: Start Compression...`);
-
-        // 1. Generate Thumbnail (300px)
-        const thumbBlob = await resizeImage(bitmap, 300);
-
-        // 2. Generate Analysis (1024px)
-        const analysisBlob = await resizeImage(bitmap, 1024);
-
-        console.log(`[Worker] Processing ${id}: Compression Complete. Thumb=${thumbBlob?.size}, Analysis=${analysisBlob?.size}`);
-
-        self.postMessage({
-            id,
-            status: 'success',
-            thumbBlob,
-            analysisBlob
-        });
-
-        bitmap.close();
-    } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        self.postMessage({ id, status: 'error', error: message });
-    }
-};
-
-async function resizeImage(bitmap: ImageBitmap, targetSize: number): Promise<Blob | null> {
-    const scale = Math.min(targetSize / bitmap.width, targetSize / bitmap.height, 1);
-    // If no scaling needed and original is wanted, return original? 
-    // No, we always want consistent formats (e.g. jpeg/webp). 
-    // If scale is 1, we still draw it.
-
-    const width = Math.round(bitmap.width * scale);
-    const height = Math.round(bitmap.height * scale);
-
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-
-    if (!ctx) throw new Error("Could not get canvas context");
-
-    // High quality resize
-    ctx.drawImage(bitmap, 0, 0, width, height);
-
-    return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
-}
-
-export { };
-</file>
-
 <file path="src/App.tsx">
 import { useState, useEffect, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -2253,7 +2947,7 @@ function App() {
   const [sortMode, setSortMode] = useState<'date' | 'score'>('date');
   const [minScore, setMinScore] = useState<number>(0);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [viewingPhoto, setViewingPhoto] = useState<PhotoMetadata | null>(null);
+  const [viewingPhotoId, setViewingPhotoId] = useState<string | null>(null);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
 
   // Keyboard shortcut for Admin
@@ -2283,31 +2977,43 @@ function App() {
     return counts;
   }, []) || { new: 0, processing: 0, done: 0, queued: 0, analyzing: 0, scored: 0, error: 0, total: 0 };
 
-  /* Main Photos Query - Fixed to include everything even when sorting */
+  /* Main Photos Query - 增强版 */
   const photos = useLiveQuery(async () => {
-    let result = await db.photos.toArray();
+    const all = await db.photos.toArray();
 
-    // 修改排序逻辑：强制转为 Number，防止字符串数据导致排序失效
+    // 1. 创建副本，确保不修改原始引用，配合 React 状态更新
+    const result = [...all];
+
     result.sort((a, b) => {
       if (sortMode === 'score') {
-        // 1. 强制转为数字，如果无效则设为 -1 (排在最后)
-        const valA = (a.score !== undefined && a.score !== null) ? Number(a.score) : -1;
-        const valB = (b.score !== undefined && b.score !== null) ? Number(b.score) : -1;
+        // --- 强健的数值转换逻辑 ---
+        const getVal = (v: any) => {
+          if (v === undefined || v === null) return -1; // 无分数的排最后
+          const n = Number(v);
+          return isNaN(n) ? -1 : n; // 非数字的也排最后
+        };
 
-        // 2. 如果是 NaN (转换失败)，也当做 -1
-        const safeA = isNaN(valA) ? -1 : valA;
-        const safeB = isNaN(valB) ? -1 : valB;
+        const valA = getVal(a.score);
+        const valB = getVal(b.score);
 
-        // 3. 执行降序排序 (大 -> 小)
-        return safeB - safeA;
+        // 如果分数不相等，直接按分数降序（大到小）
+        if (valA !== valB) {
+          return valB - valA;
+        }
+        // 如果分数相等（比如都是 0 或都是 8.5），继续往下走，使用时间作为二级排序
       }
 
-      // 默认按时间倒序
+      // --- 默认/二级排序：按时间倒序 (新 -> 旧) ---
       return (b.createdAt || 0) - (a.createdAt || 0);
     });
 
+    // 调试日志：打开浏览器控制台(F12)查看前3个元素，确认数据层是否正确
+    if (result.length > 0) {
+      console.log(`[Sort Debug] Mode: ${sortMode}. Top 1: Score=${result[0].score}, ID=${result[0].id}`);
+    }
+
     if (minScore > 0) {
-      result = result.filter(p => (Number(p.score) || 0) >= minScore);
+      return result.filter(p => (Number(p.score) || 0) >= minScore);
     }
     return result;
   }, [sortMode, minScore]) || [];
@@ -2353,8 +3059,12 @@ function App() {
       const newPhotos: PhotoMetadata[] = files.map(f => ({
         id: f.id,
         name: f.name,
-        path: f.path,
+        // path: f.path, // 'path' removed from PhotoMetadata? No, let's check db.ts view. 'path' is NOT in PhotoMetadata view in step 635.
         size: f.file ? f.file.size : 0,
+        type: f.file ? f.file.type : 'application/octet-stream',
+        lastModified: f.file ? f.file.lastModified : Date.now(),
+        webkitRelativePath: f.path || (f.file ? f.file.webkitRelativePath : ''),
+
         handle: f.handle,
         file: f.file,
         status: 'new',
@@ -2569,16 +3279,16 @@ function App() {
             photos={photos}
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
-            onView={setViewingPhoto}
+            onView={(p) => setViewingPhotoId(p.id)}
           />
         )}
       </div>
 
       {/* Detail Modal */}
-      {viewingPhoto && (
+      {viewingPhotoId && (
         <PhotoDetailModal
-          photo={viewingPhoto}
-          onClose={() => setViewingPhoto(null)}
+          photoId={viewingPhotoId}
+          onClose={() => setViewingPhotoId(null)}
         />
       )}
 
@@ -2594,144 +3304,6 @@ function App() {
 }
 
 export default App;
-</file>
-
-<file path="src/index.css">
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-:root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-
-  color-scheme: dark;
-  /* Force dark mode preference */
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #0f0f0f;
-  /* Deep dark background for Photo App */
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  min-width: 320px;
-  min-height: 100vh;
-  background-color: #0f0f0f;
-  color: #fff;
-}
-
-#root {
-  width: 100%;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Custom Scrollbar */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 4px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #444;
-}
-</file>
-
-<file path="src/vite-env.d.ts">
-/// <reference types="vite/client" />
-
-interface Window {
-    showDirectoryPicker(): Promise<FileSystemDirectoryHandle>;
-}
-
-interface FileSystemHandle {
-    kind: 'file' | 'directory';
-    name: string;
-}
-
-interface FileSystemFileHandle extends FileSystemHandle {
-    kind: 'file';
-    getFile(): Promise<File>;
-}
-
-interface FileSystemDirectoryHandle extends FileSystemHandle {
-    kind: 'directory';
-    values(): AsyncIterableIterator<FileSystemHandle>;
-}
-
-// Drag and Drop (Webkit) API types
-interface FileSystemEntry {
-    isFile: boolean;
-    isDirectory: boolean;
-    name: string;
-    fullPath: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    filesystem: any;
-}
-
-interface FileSystemFileEntry extends FileSystemEntry {
-    isFile: true;
-    isDirectory: false;
-    file(successCallback: (file: File) => void, errorCallback?: (error: DOMException) => void): void;
-}
-
-interface FileSystemDirectoryEntry extends FileSystemEntry {
-    isFile: false;
-    isDirectory: true;
-    createReader(): FileSystemDirectoryReader;
-}
-
-interface FileSystemDirectoryReader {
-    readEntries(successCallback: (entries: FileSystemEntry[]) => void, errorCallback?: (error: DOMException) => void): void;
-}
-
-interface DataTransferItem {
-    webkitGetAsEntry(): FileSystemEntry | null;
-}
-</file>
-
-<file path=".gitignore">
-# Dependencies
-node_modules
-.pnp
-.pnp.js
-
-# Production / Build
-dist
-build
-
-# Environment Variables (CRITICAL!)
-.env
-.env.local
-.env.*.local
-
-# Debug logs & Temp files
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.node_modules/.tmp
-tsconfig.tsbuildinfo
-
-# OS files
-.DS_Store
-Thumbs.db
 </file>
 
 <file path="package.json">
@@ -2783,63 +3355,6 @@ Thumbs.db
     "vitest": "^4.0.16"
   }
 }
-</file>
-
-<file path="README.md">
-# PhotoRank AI 📸
-
-**AI-Powered Professional Photo Culling & Aesthetic Scoring Tool**
-
-PhotoRank AI is a high-performance web application designed for photographers to automate the tedious process of selecting the best shots from thousands of images.
-
-### ✨ Key Features
-- **Privacy-First**: All image compression and processing happen locally in your browser via Web Workers and IndexedDB.
-- **AI Aesthetic Scoring**: Uses Google Gemini Pro Vision to provide multi-dimensional scoring (composition, lighting, technical quality).
-- **Industrial Performance**: Handles large batches of high-res photos without freezing the UI.
-- **Offline Persistent**: Your ratings and progress are saved locally in the browser.
-
-### 🛠️ Tech Stack
-- **Framework**: React 19 + Vite 7 (Latest)
-- **Intelligence**: Google Gemini API
-- **Storage**: Dexie.js (IndexedDB)
-- **Animation**: Framer Motion
-- **Styling**: Tailwind CSS
-
-### 🚀 Getting Started
-1. **Clone the repo**: `git clone https://github.com/Shadyupup/PhotoRank-AI.git`
-2. **Install**: `npm install`
-3. **Set up API Key**: Create a `.env` file and add `VITE_GEMINI_API_KEY=your_key_here`
-4. **Run**: `npm run dev`
-</file>
-
-<file path="vite.config.ts">
-/// <reference types="vitest" />
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
-import path from 'path'
-
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  server: {
-    headers: {
-      // "Cross-Origin-Opener-Policy": "same-origin",
-      // "Cross-Origin-Embedder-Policy": "require-corp",
-    },
-  },
-  optimizeDeps: {
-    exclude: ['@google/generative-ai'],
-  },
-  test: {
-    environment: 'happy-dom',
-    globals: true
-  }
-})
 </file>
 
 </files>

@@ -120,45 +120,73 @@ export function useAIPipeline() {
                     logger.info(`Pipeline: Starting batch analysis for ${tasks.length} photos: [${taskIds.join(', ')}]`);
 
                     // Execute logic inline (awaiting it)
-                    // Execute logic inline (awaiting it)
-                    const items = tasks.map(t => ({ id: t.id, blob: t.analysisBlob })).filter((item): item is { id: string, blob: Blob } => !!item.blob);
+                    // 1. Separate valid items from invalid ones (missing blob or size 0)
+                    const validItems: { id: string, blob: Blob }[] = [];
+                    const invalidIds: string[] = [];
 
-                    if (items.length !== tasks.length) throw new Error("Missing analysis data for some task");
+                    tasks.forEach(t => {
+                        if (t.analysisBlob && t.analysisBlob.size > 0) {
+                            validItems.push({ id: t.id, blob: t.analysisBlob });
+                        } else {
+                            invalidIds.push(t.id);
+                        }
+                    });
 
-                    const results = await analyzePhotosBatch(items);
-                    logger.info("AI 返回结果数组:", results);
-
-                    // Create a Map for O(1) Lookup by ID
-                    const resultMap = new Map(results.map(r => [r.file_id, r]));
-
-                    if (results.length !== tasks.length) {
-                        logger.error(`Batch mismatch: Sent ${tasks.length}, Got ${results.length}. Handling individual items...`);
-                    }
-
-                    // Critical: Always save results even if component unmounted (Zombie process handling)
-                    await db.transaction('rw', db.photos, async () => {
-                        for (let i = 0; i < tasks.length; i++) {
-                            const task = tasks[i];
-                            const res = resultMap.get(task.id);
-
-                            if (res) {
-                                await db.photos.update(task.id, {
-                                    score: parseFloat(String(res.score)) || 0, // 强转为浮点数
-                                    reason: res.reason || "无理由",
-                                    status: 'scored',
-                                    analysisBlob: undefined, // Free up space!
-                                    updatedAt: Date.now()
-                                });
-                            } else {
-                                logger.warn(`Missing result for ID: ${task.id} - Re-queuing`);
-                                await db.photos.update(task.id, {
-                                    status: 'queued',
+                    // 2. Handle Invalid Items immediately (Mark as Error)
+                    if (invalidIds.length > 0) {
+                        logger.error(`Pipeline: Found ${invalidIds.length} tasks with missing/empty image data. Marking as error.`);
+                        await db.transaction('rw', db.photos, async () => {
+                            for (const id of invalidIds) {
+                                await db.photos.update(id, {
+                                    status: 'error',
+                                    reason: 'Image data lost or corrupted (0 bytes)',
                                     updatedAt: Date.now()
                                 });
                             }
+                        });
+                    }
+
+                    // 3. Process Valid Items
+                    if (validItems.length > 0) {
+                        try {
+                            const results = await analyzePhotosBatch(validItems);
+                            logger.info("AI 返回结果数组:", results);
+
+                            // Create a Map for O(1) Lookup by ID
+                            const resultMap = new Map(results.map(r => [r.file_id, r]));
+
+                            await db.transaction('rw', db.photos, async () => {
+                                for (const item of validItems) {
+                                    const res = resultMap.get(item.id);
+
+                                    if (res) {
+                                        await db.photos.update(item.id, {
+                                            score: parseFloat(String(res.score)) || 0,
+                                            reason: res.reason || "无理由",
+                                            status: 'scored',
+                                            analysisBlob: undefined, // Free up space!
+                                            updatedAt: Date.now()
+                                        });
+                                    } else {
+                                        logger.warn(`Missing result for ID: ${item.id} - Re-queuing`);
+                                        await db.photos.update(item.id, {
+                                            status: 'queued',
+                                            updatedAt: Date.now()
+                                        });
+                                    }
+                                }
+                            });
+                            logger.success(`Pipeline: Successfully scored batch of ${validItems.length}`);
+                        } catch (err) {
+                            // If the batch API call fails, we should probably retry later or mark as error
+                            // For now, letting the outer catch handle it (which keeps them in 'analyzing' until watchdog resets them) is okay,
+                            // OR we can explicitly reset them to queued.
+                            logger.error("Batch Analysis Failed", err);
+                            throw err; // Re-throw to trigger outer catch
                         }
-                    });
-                    logger.success(`Pipeline: Successfully scored batch of ${tasks.length}`);
+                    } else {
+                        logger.warn("Pipeline: No valid items to process in this batch.");
+                    }
                     logger.info(`Pipeline: DB Update Verified. notifying UI...`);
                 }
             }

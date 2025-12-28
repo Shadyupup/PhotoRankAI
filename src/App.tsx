@@ -25,7 +25,7 @@ function App() {
   const [sortMode, setSortMode] = useState<'date' | 'score'>('date');
   const [minScore, setMinScore] = useState<number>(0);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [viewingPhoto, setViewingPhoto] = useState<PhotoMetadata | null>(null);
+  const [viewingPhotoId, setViewingPhotoId] = useState<string | null>(null);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
 
   // Keyboard shortcut for Admin
@@ -137,8 +137,12 @@ function App() {
       const newPhotos: PhotoMetadata[] = files.map(f => ({
         id: f.id,
         name: f.name,
-        path: f.path,
+        // path: f.path, // 'path' removed from PhotoMetadata? No, let's check db.ts view. 'path' is NOT in PhotoMetadata view in step 635.
         size: f.file ? f.file.size : 0,
+        type: f.file ? f.file.type : 'application/octet-stream',
+        lastModified: f.file ? f.file.lastModified : Date.now(),
+        webkitRelativePath: f.path || (f.file ? f.file.webkitRelativePath : ''),
+
         handle: f.handle,
         file: f.file,
         status: 'new',
@@ -353,16 +357,16 @@ function App() {
             photos={photos}
             selectedIds={selectedIds}
             onToggleSelect={handleToggleSelect}
-            onView={setViewingPhoto}
+            onView={(p) => setViewingPhotoId(p.id)}
           />
         )}
       </div>
 
       {/* Detail Modal */}
-      {viewingPhoto && (
+      {viewingPhotoId && (
         <PhotoDetailModal
-          photo={viewingPhoto}
-          onClose={() => setViewingPhoto(null)}
+          photoId={viewingPhotoId}
+          onClose={() => setViewingPhotoId(null)}
         />
       )}
 
