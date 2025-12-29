@@ -1,11 +1,18 @@
 import { useState } from 'react';
-import { analyzePhotosBatch, editImageWithGemini } from '@/lib/gemini';
 import { db, PhotoMetadata } from '@/lib/db';
+import {
+    analyzePhotosBatch,
+    detectImageContent,
+    extractSubjectWithGemini,
+    removeSubjectFromImage,
+    optimizeBackground,
+    mergeAndHarmonize,
+    analyzeLightingCondition,
+    optimizeLandscape,
+    evaluateLandscape // 新增
+} from '@/lib/gemini';
 import { logger } from '@/lib/logger';
 import { toast } from 'sonner';
-
-const TARGET_SCORE = 8.0;
-const MAX_ITERATIONS = 3;
 
 export function useAutoOptimizer() {
     const [isOptimizing, setIsOptimizing] = useState(false);
@@ -13,97 +20,130 @@ export function useAutoOptimizer() {
     const startOptimization = async (photo: PhotoMetadata) => {
         if (isOptimizing) return;
         setIsOptimizing(true);
-
-        const toastId = toast.loading("启动 AI 自动化精修流水线...");
+        const toastId = toast.loading("AI 极简精修中...");
 
         try {
-            // 1. 准备初始素材
+            // 0. 准备数据
             let currentBlob = photo.analysisBlob || photo.previewBlob;
-            if (!currentBlob && photo.file) {
-                currentBlob = new Blob([photo.file], { type: photo.file.type });
-            }
-            if (!currentBlob) throw new Error("无法获取原图数据");
+            if (!currentBlob && photo.file) currentBlob = new Blob([photo.file], { type: photo.file.type });
+            if (!currentBlob) throw new Error("无法获取图片数据");
 
-            // --- 关键修复：备份原图 ---
-            // 如果还没有备份过 originalBlob，说明这是第一次精修，把当前图存为原图
-            let originalBlob = photo.originalBlob;
-            if (!originalBlob) {
-                originalBlob = currentBlob;
-                logger.info("已创建原图备份 (Original Blob Saved)");
-                // 立即写入 DB 以防中途失败
+            // 备份原图
+            if (!photo.originalBlob) {
                 await db.photos.update(photo.id, { originalBlob: currentBlob });
-            }
-            // ------------------------
-
-            // 2. 初始化状态
-            let currentScore = photo.score || 0;
-            let currentReason = photo.reason || "General improvement for professional look";
-
-            if (!photo.score) {
-                toast.loading("正在进行初始评分 (Gemini 3 Flash)...", { id: toastId });
-                const initRes = await analyzePhotosBatch([{ id: 'init', blob: currentBlob }]);
-                currentScore = initRes[0].score;
-                currentReason = initRes[0].reason;
+            } else {
+                currentBlob = photo.originalBlob;
             }
 
-            let iteration = 0;
+            // Step 0: 侦测光影 DNA
+            toast.loading("Step 0: 侦测光影 DNA...", { id: toastId });
+            const lightingInfo = await analyzeLightingCondition(currentBlob);
+            logger.info(`光影分析: ${lightingInfo}`);
 
-            // --- 核心循环 ---
-            while (currentScore < TARGET_SCORE && iteration < MAX_ITERATIONS) {
-                iteration++;
-                logger.info(`>>> [迭代 ${iteration}] 当前分数: ${currentScore}. 改进目标: ${currentReason}`);
+            // 1. 判断是否是人像
+            toast.loading("Step 1: 分析画面内容...", { id: toastId });
+            const contentInfo = await detectImageContent(currentBlob);
 
-                // A. 修图
-                toast.loading(`[第 ${iteration} 轮] Nano Banana 正在修图...\n目标: "${currentReason.slice(0, 30)}..."`, { id: toastId });
-                const newBlob = await editImageWithGemini(currentBlob, currentReason);
+            let finalResultBlob = currentBlob;
+            let currentReason = "Optimization complete";
+            let currentScore = 0;
 
-                // B. 评分
-                toast.loading(`[第 ${iteration} 轮] Gemini 3 Flash 正在验收评分...`, { id: toastId });
-                const analysisResult = await analyzePhotosBatch([{ id: `iter-${iteration}`, blob: newBlob }]);
-                const result = analysisResult[0];
+            if (contentInfo.hasLivingBeings && contentInfo.subjectType === 'person') {
+                logger.info("🚀 人像模式 (极简流程)");
 
-                logger.info(`<<< [迭代 ${iteration}] 结果: ${result.score}分 (原 ${currentScore}分)`);
+                // 2. 提出人像 (Layer A)
+                toast.loading("Step 2: 提取人像...", { id: toastId });
+                const personLayer = await extractSubjectWithGemini(currentBlob);
 
-                currentScore = result.score;
-                currentReason = result.reason;
-                currentBlob = newBlob;
+                // 3. 生成无人背景 (Layer B)
+                toast.loading("Step 3: 移除主体...", { id: toastId });
+                const cleanBackground = await removeSubjectFromImage(currentBlob);
+
+                // 4. 优化背景 (Layer C) - 传入光影信息
+                toast.loading("Step 4: 匹配环境光...", { id: toastId });
+                const optimizedBackground = await optimizeBackground(cleanBackground, lightingInfo);
+
+                // 5. 融合 (Merge) - 传入光影信息
+                toast.loading("Step 5: 影楼级合成...", { id: toastId });
+                finalResultBlob = await mergeAndHarmonize(
+                    currentBlob,        // 原图 (保真)
+                    personLayer,        // 形状
+                    optimizedBackground, // 氛围
+                    lightingInfo        // 光影上下文
+                );
+
+                // 评分
+                const finalRes = await analyzePhotosBatch([{ id: 'final', blob: finalResultBlob }]);
+                currentScore = finalRes[0].score;
+                currentReason = "Enhanced portrait with preserved identity.";
+
+            } else {
+                // --- 风景模式：智能迭代循环 (Feedback Loop) ---
+                logger.info("🏞️ 风景模式 (智能迭代版)");
+
+                let loopBlob = currentBlob;
+                let loopScore = 0;
+                let loopReason = "Initial Capture";
+                let iteration = 0;
+                const MAX_LOOPS = 3;    // 最多跑3轮
+                const TARGET_SCORE_LANDSCAPE = 8.0; // 目标分
+
+                // 循环开始
+                while (iteration < MAX_LOOPS) {
+                    iteration++;
+                    toast.loading(`Round ${iteration}: AI 正在评审 & 思考...`, { id: toastId });
+
+                    // 1. 评分 & 获取修改意见 (Flash)
+                    const evalResult = await evaluateLandscape(loopBlob);
+                    loopScore = evalResult.score;
+                    loopReason = evalResult.critique;
+
+                    logger.info(`[Loop ${iteration}] Score: ${loopScore}, Fix: ${evalResult.improvementPrompt}`);
+
+                    // 达标检测：如果分数够了，或者已经在最后一轮了，就跳出
+                    if (loopScore >= TARGET_SCORE_LANDSCAPE) {
+                        toast.success(`达标! 分数: ${loopScore}`, { id: toastId });
+                        break;
+                    }
+                    if (iteration === MAX_LOOPS) {
+                        toast("已达到最大优化次数", { id: toastId });
+                        break;
+                    }
+
+                    // 2. 执行精修 (Image Pro)
+                    toast.loading(`Round ${iteration}: 正在执行: ${evalResult.critique.slice(0, 20)}...`, { id: toastId });
+                    try {
+                        loopBlob = await optimizeLandscape(loopBlob, evalResult.improvementPrompt);
+                    } catch (e) {
+                        logger.error("生成失败，保留上一轮结果", e);
+                        break; // 如果生成挂了，就用上一次的好图
+                    }
+                }
+
+                // 循环结束，赋值给最终结果
+                finalResultBlob = loopBlob;
+                currentScore = loopScore;
+                currentReason = `[Loop x${iteration}] ${loopReason}`;
             }
 
-            // --- 结果处理 ---
-            const isSuccess = currentScore >= TARGET_SCORE;
-            const finalMsg = isSuccess
-                ? `🎉 优化成功！最终分数: ${currentScore}`
-                : `⚠️ 迭代结束. 最终: ${currentScore}`;
-
-            if (isSuccess) toast.success(finalMsg, { id: toastId });
-            else toast.warning(finalMsg, { id: toastId });
-
-            // 写入数据库
-            await db.transaction('rw', db.photos, async () => {
-                await db.photos.update(photo.id, {
-                    // analysisBlob 更新为 AI 的新图
-                    analysisBlob: currentBlob,
-                    // previewBlob 也更新
-                    previewBlob: currentBlob,
-
-                    // originalBlob 已经在前面保存过了，这里不需要动，它永远是原图
-
-                    score: currentScore,
-                    reason: currentReason,
-                    status: 'scored',
-                    updatedAt: Date.now(),
-
-                    // 清除 Magic Fix 的 CSS 参数，因为我们已经像素级重绘了
-                    magicEdits: undefined
-                });
+            // 保存
+            await db.photos.update(photo.id, {
+                analysisBlob: finalResultBlob,
+                previewBlob: finalResultBlob,
+                score: currentScore,
+                // 如果之前没存过原分，且当前有分，则备份当前分；否则保持原样
+                originalScore: photo.originalScore ?? photo.score,
+                reason: currentReason,
+                status: 'scored',
+                updatedAt: Date.now()
             });
 
+            toast.success(`精修完成: ${currentScore.toFixed(1)}`, { id: toastId });
             window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
 
         } catch (error) {
             console.error(error);
-            const errMsg = error instanceof Error ? error.message : String(error);
-            toast.error("自动化精修中断: " + errMsg, { id: toastId });
+            toast.error("处理失败: " + (error instanceof Error ? error.message : "未知错误"), { id: toastId });
         } finally {
             setIsOptimizing(false);
         }

@@ -35,6 +35,7 @@ export interface PhotoMetadata {
 
     // AI Results
     score?: number;
+    originalScore?: number;   // <--- 【新增】保存优化前的原始分数
     reason?: string;
     status: 'new' | 'processing' | 'queued' | 'analyzing' | 'scored' | 'error' | 'done';
 
@@ -48,9 +49,9 @@ export interface PhotoMetadata {
 export interface LogEntry {
     id?: number;
     timestamp: number;
-    level: 'info' | 'warn' | 'error';
+    level: 'info' | 'warn' | 'error' | 'success';
     message: string;
-    details?: unknown;
+    data?: unknown;
 }
 
 export class PhotoRankDB extends Dexie {
@@ -59,12 +60,23 @@ export class PhotoRankDB extends Dexie {
 
     constructor() {
         super('PhotoRankDB');
-        // 强行提到 25（必须比你之前看到的 21 大）
-        this.version(25).stores({
+        // 升级版本号到 26，以应用 schema 变更
+        this.version(26).stores({
             photos: 'id, status, score, createdAt',
             logs: '++id, timestamp, level'
         });
     }
 }
 
+
 export const db = new PhotoRankDB();
+
+export async function resetDatabase() {
+    try {
+        await db.delete();
+        return true;
+    } catch (e) {
+        console.error("Failed to delete database", e);
+        return false;
+    }
+}

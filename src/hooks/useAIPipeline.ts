@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { db } from '@/lib/db';
+import { db, resetDatabase } from '@/lib/db';
 import { analyzePhotosBatch } from '@/lib/gemini';
 import { logger } from '@/lib/logger';
+import { toast } from 'sonner';
 
 const BATCH_SIZE = 4;
 const RATE_LIMIT_DELAY_MS = 2000;
@@ -29,7 +30,16 @@ export function useAIPipeline() {
                     });
                 }
             }
-        } catch (e) {
+        } catch (e: unknown) { // Use unknown instead of any
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const err = e as any;
+            // CRITICAL: Handle Dexie DatabaseClosedError/UnknownError
+            if (err?.name === 'DatabaseClosedError' || err?.message?.includes('backing store') || err?.name === 'UnknownError') {
+                logger.error("[Critical] Database corruption during recovery. Stopping.", err);
+                // No need to toast here if processQueue also toasts, but to be safe:
+                // We just abort recovery.
+                return;
+            }
             console.error("Recovery failed", e);
         }
     };
@@ -62,6 +72,7 @@ export function useAIPipeline() {
             mountedRef.current = false;
             window.removeEventListener('pipeline-wakeup', wakeUp);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const processQueue = async () => {
@@ -195,10 +206,33 @@ export function useAIPipeline() {
             // Sync analyzing status
             setIsAnalyzing(activeCount > 0);
 
-        } catch (error) {
+        } catch (error: unknown) { // Use unknown instead of any
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const err = error as any;
+            // CRITICAL: Handle Dexie DatabaseClosedError/UnknownError to prevent crash loops
+            if (err?.name === 'DatabaseClosedError' || err?.message?.includes('backing store') || err?.name === 'UnknownError') {
+                logger.error("[Critical] Database corruption detected. Stopping pipeline.", err);
+
+                // Stop the recursion by ensuring mountedRef is ignored or explicitly return
+                mountedRef.current = false;
+
+                // Show a persistent error toast
+                toast.error("Database Error: Corruption Detected", {
+                    duration: Infinity,
+                    description: "Click 'Fix' to reset database and recover.",
+                    action: {
+                        label: 'Fix & Reload',
+                        onClick: async () => {
+                            await resetDatabase();
+                            window.location.reload();
+                        }
+                    }
+                });
+                return; // STOP EXECUTION (Skip finally block logic if possible, or handle in finally)
+            }
             logger.error("Pipeline 运行异常", error);
         } finally {
-            // 确保心跳永不停止
+            // 确保心跳永不停止 (除非挂了)
             if (mountedRef.current) {
                 setTimeout(processQueue, 2000);
             }

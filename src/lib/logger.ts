@@ -36,8 +36,10 @@ class LoggerService {
         }
 
         // Log to console for dev (Silenced for Production Cleanliness)
-        const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
-        console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
+        if (import.meta.env.DEV || level === 'error') {
+            const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
+            console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
+        }
 
         // Persist to DB (Simulated/Optional for now to prevent schema errors if not updated)
         try {

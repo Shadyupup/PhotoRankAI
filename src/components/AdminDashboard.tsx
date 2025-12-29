@@ -41,10 +41,15 @@ export function AdminDashboard({ onClose, onRetry }: AdminDashboardProps) {
     }, [search, filter]) || [];
 
     const handleClearAll = async () => {
-        if (confirm('Are you sure you want to CLEAR ALL DATA? This cannot be undone.')) {
+        const confirmMsg = prompt('DANGER ZONE: This will permanently delete ALL photos and logs.\n\nType "DELETE" to confirm:');
+        if (confirmMsg === 'DELETE') {
             await db.photos.clear();
             await db.logs.clear();
             logger.warn('Administrative Data Wipe performed');
+            toast.success("System reset complete.");
+            onClose();
+        } else if (confirmMsg !== null) {
+            toast.error("Deletion cancelled. Verification failed.");
         }
     };
 
@@ -125,9 +130,10 @@ export function AdminDashboard({ onClose, onRetry }: AdminDashboardProps) {
                                     const result = await testGeminiConnection();
                                     toast.dismiss();
                                     toast.success("Connection Successful!", { description: `Response: ${result}` });
-                                } catch (e: any) {
+                                } catch (e: unknown) {
+                                    const errMsg = e instanceof Error ? e.message : String(e);
                                     toast.dismiss();
-                                    toast.error("Connection Failed", { description: e.message });
+                                    toast.error("Connection Failed", { description: errMsg });
                                 }
                             }}
                             className="flex items-center gap-2 px-4 py-2 bg-purple-600/10 text-purple-400 border border-purple-600/30 rounded-xl hover:bg-purple-600/20 transition-all text-sm font-medium"

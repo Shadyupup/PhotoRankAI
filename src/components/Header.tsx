@@ -1,20 +1,21 @@
-import { FolderOpen, Settings } from 'lucide-react';
+import { FolderOpen, Settings, ImagePlus } from 'lucide-react'; // 引入 ImagePlus 图标
 import { motion } from 'framer-motion';
 
 interface HeaderProps {
     onOpenFolder: () => void;
+    onOpenFiles: () => void; // 新增：打开文件选择器的回调
     onOpenAdmin?: () => void;
     onRetry?: () => void;
     total: number;
-    processed: number; // Local processing done
-    analyzed: number;  // AI Analysis done
+    processed: number;
+    analyzed: number;
     queueLength: number;
     analyzingCount: number;
     errorCount: number;
     supportsFileSystemAccess?: boolean;
 }
 
-export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
+export function Header({ onOpenFolder, onOpenFiles, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
     const processingProgress = total > 0 ? (processed / total) * 100 : 0;
     const analysisProgress = total > 0 ? (analyzed / total) * 100 : 0;
 
@@ -68,7 +69,7 @@ export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, a
                 </div>
             )}
 
-            {/* Pipeline Stats (New) */}
+            {/* Pipeline Stats */}
             {total > 0 && (
                 <div className="mr-6 flex items-center gap-4 text-xs font-mono text-gray-500 border-r border-[#262626] pr-6">
                     <div className="flex flex-col items-end">
@@ -88,26 +89,37 @@ export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, a
 
             {/* Right: Actions */}
             <div className="flex items-center gap-3">
+                {/* Admin Button - Hidden in Prod, accessible via Alt+Shift+A */}
+                {import.meta.env.DEV && (
+                    <button
+                        onClick={onOpenAdmin}
+                        title="Admin Console (Alt+Shift+A)"
+                        className="p-2.5 bg-[#1A1A1A] text-gray-400 border border-[#262626] rounded-xl hover:text-white hover:bg-[#262626] transition-all active:scale-95"
+                    >
+                        <Settings size={18} />
+                    </button>
+                )}
+
+                {/* 拆分为两个明确的按钮 */}
                 <button
-                    onClick={onOpenAdmin}
-                    title="Admin Console (Alt+Shift+A)"
-                    className="p-2.5 bg-[#1A1A1A] text-gray-400 border border-[#262626] rounded-xl hover:text-white hover:bg-[#262626] transition-all active:scale-95"
+                    onClick={onOpenFiles}
+                    title="Select individual photos to analyze"
+                    className="flex items-center gap-2 px-4 py-2 bg-[#1A1A1A] text-white border border-[#262626] rounded-lg text-sm font-semibold hover:bg-[#262626] transition-colors active:scale-95 duration-100"
                 >
-                    <Settings size={18} />
+                    <ImagePlus size={16} className="text-blue-500" />
+                    Add Photos
                 </button>
+
                 {supportsFileSystemAccess ? (
                     <button
                         onClick={onOpenFolder}
+                        title="Import a full folder (Standard Mode)"
                         className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-95 duration-100"
                     >
                         <FolderOpen size={16} />
                         Import Folder
                     </button>
-                ) : (
-                    <div className="text-xs text-gray-500 px-2">
-                        (Drag & Drop supported)
-                    </div>
-                )}
+                ) : null}
             </div>
         </header>
     );

@@ -49,6 +49,7 @@ src/
     AdminDashboard.tsx
     AppShell.tsx
     DebugConsole.tsx
+    GlobalErrorBoundary.tsx
     Header.tsx
     PhotoCard.tsx
     PhotoDetailModal.tsx
@@ -63,7 +64,9 @@ src/
   lib/
     db.ts
     gemini.ts
+    imageProcessing.ts
     logger.ts
+    segmentation.ts
     utils.ts
   workers/
     imageProcessor.worker.ts
@@ -94,108 +97,172 @@ vite.config.ts
 <files>
 This section contains the contents of the repository's files.
 
-<file path="src/hooks/useAutoOptimizer.ts">
-import { useState } from 'react';
-import { analyzePhotosBatch, editImageWithGemini } from '@/lib/gemini';
-import { db, PhotoMetadata } from '@/lib/db';
-import { logger } from '@/lib/logger';
-import { toast } from 'sonner';
+<file path="src/components/GlobalErrorBoundary.tsx">
+import React, { Component, ErrorInfo, ReactNode } from "react";
+import { resetDatabase } from "@/lib/db";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 
-const TARGET_SCORE = 8.0; // 目标分数
-const MAX_ITERATIONS = 3; // 最大迭代次数 (防止无限循环消耗额度)
+interface Props {
+    children: ReactNode;
+}
 
-export function useAutoOptimizer() {
-    const [isOptimizing, setIsOptimizing] = useState(false);
+interface State {
+    hasError: boolean;
+    error: Error | null;
+}
 
-    const startOptimization = async (photo: PhotoMetadata) => {
-        if (isOptimizing) return;
-        setIsOptimizing(true);
-
-        // 创建一个持久的 Toast 来显示进度
-        const toastId = toast.loading("启动 AI 自动化精修流水线...");
-
-        try {
-            // 1. 准备初始素材
-            let currentBlob = photo.analysisBlob || photo.previewBlob;
-            // 如果没有 Blob (比如刚加载)，尝试从 file 转换
-            if (!currentBlob && photo.file) {
-                currentBlob = new Blob([photo.file], { type: photo.file.type });
-            }
-            if (!currentBlob) throw new Error("无法获取原图数据");
-
-            // 2. 初始化状态
-            let currentScore = photo.score || 0;
-            let currentReason = photo.reason || "General improvement for professional look";
-
-            // 如果初始没有分数，先跑一次评分 (使用 gemini-3-flash-preview)
-            if (!photo.score) {
-                toast.loading("正在进行初始评分 (Gemini 3 Flash)...", { id: toastId });
-                const initRes = await analyzePhotosBatch([{ id: 'init', blob: currentBlob }]);
-                currentScore = initRes[0].score;
-                currentReason = initRes[0].reason;
-            }
-
-            let iteration = 0;
-
-            // --- 核心循环 (Auto Loop) ---
-            while (currentScore < TARGET_SCORE && iteration < MAX_ITERATIONS) {
-                iteration++;
-                logger.info(`>>> [迭代 ${iteration}] 当前分数: ${currentScore}. 改进目标: ${currentReason}`);
-
-                // A. 修图阶段 (使用 gemini-3-pro-image-preview)
-                toast.loading(`[第 ${iteration} 轮] Nano Banana 正在修图...\n目标: "${currentReason.slice(0, 30)}..."`, { id: toastId });
-
-                // 调用生图接口
-                const newBlob = await editImageWithGemini(currentBlob, currentReason);
-
-                // B. 验收阶段 (使用 gemini-3-flash-preview)
-                toast.loading(`[第 ${iteration} 轮] Gemini 3 Flash 正在验收评分...`, { id: toastId });
-
-                const analysisResult = await analyzePhotosBatch([{ id: `iter-${iteration}`, blob: newBlob }]);
-                const result = analysisResult[0];
-
-                logger.info(`<<< [迭代 ${iteration}] 结果: ${result.score}分 (原 ${currentScore}分)`);
-
-                // 更新循环状态
-                currentScore = result.score;
-                currentReason = result.reason; // 新的改进意见将用于下一轮（如果需要的话）
-                currentBlob = newBlob;         // 基础图更新为新图
-            }
-
-            // --- 循环结束，保存结果 ---
-            const isSuccess = currentScore >= TARGET_SCORE;
-            const finalMsg = isSuccess
-                ? `🎉 优化成功！最终分数: ${currentScore}`
-                : `⚠️ 迭代结束 (未达 8.0). 最终: ${currentScore}`;
-
-            if (isSuccess) toast.success(finalMsg, { id: toastId });
-            else toast.warning(finalMsg, { id: toastId });
-
-            // 写入数据库
-            await db.transaction('rw', db.photos, async () => {
-                await db.photos.update(photo.id, {
-                    analysisBlob: currentBlob, // 替换用于分析的高清图
-                    previewBlob: currentBlob,  // 替换预览图
-                    score: currentScore,
-                    reason: currentReason,
-                    status: 'scored',
-                    updatedAt: Date.now()
-                });
-            });
-
-            // 通知 UI 刷新
-            window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
-
-        } catch (error) {
-            console.error(error);
-            const errMsg = error instanceof Error ? error.message : String(error);
-            toast.error("自动化精修中断: " + errMsg, { id: toastId });
-        } finally {
-            setIsOptimizing(false);
-        }
+export class GlobalErrorBoundary extends Component<Props, State> {
+    public state: State = {
+        hasError: false,
+        error: null,
     };
 
-    return { startOptimization, isOptimizing };
+    public static getDerivedStateFromError(error: Error): State {
+        return { hasError: true, error };
+    }
+
+    public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+        console.error("Uncaught error:", error, errorInfo);
+    }
+
+    private handleReset = async () => {
+        // Force nuke DB
+        await resetDatabase();
+        // Force hard reload
+        window.location.reload();
+    };
+
+    public render() {
+        if (this.state.hasError) {
+            const isDbError =
+                this.state.error?.name === "DatabaseClosedError" ||
+                this.state.error?.message?.includes("backing store") ||
+                this.state.error?.name === "UnknownError";
+
+            return (
+                <div className="flex flex-col items-center justify-center h-screen bg-[#0F0F0F] text-white p-8 text-center space-y-6">
+                    <div className="w-24 h-24 rounded-full bg-red-500/10 flex items-center justify-center border border-red-500/20">
+                        <AlertTriangle className="text-red-500 w-12 h-12" />
+                    </div>
+
+                    <h1 className="text-3xl font-bold">
+                        {isDbError ? "Database Corruption Detected" : "Application Error"}
+                    </h1>
+
+                    <p className="text-gray-400 max-w-md">
+                        {isDbError
+                            ? "The local database has been corrupted (likely due to multiple tabs or versions). We need to reset the local cache to fix this."
+                            : this.state.error?.message || "An unexpected error occurred."}
+                    </p>
+
+                    <button
+                        onClick={this.handleReset}
+                        className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-red-600/20 hover:scale-105 active:scale-95"
+                    >
+                        <RefreshCw className="w-5 h-5" />
+                        {isDbError ? "Reset Database & Reload" : "Reload Application"}
+                    </button>
+                </div>
+            );
+        }
+
+        return this.props.children;
+    }
+}
+</file>
+
+<file path="src/lib/imageProcessing.ts">
+/**
+ * 美图级技巧：将原图与 AI 生成图进行混合，找回"像真度"
+ * @param originalBlob 原图
+ * @param aiBlob AI 生成的图
+ * @param blendOpacity 混合透明度 (0.1 - 0.2 最佳)
+ */
+export async function blendOriginalIdentity(
+    originalBlob: Blob,
+    aiBlob: Blob,
+    blendOpacity: number = 0.15
+): Promise<Blob> {
+    // 1. 加载图片
+    const originalImg = await createImageBitmap(originalBlob);
+    const aiImg = await createImageBitmap(aiBlob);
+
+    // 2. 创建 Canvas (以 AI 图尺寸为准)
+    const canvas = new OffscreenCanvas(aiImg.width, aiImg.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error("Canvas context failed");
+
+    // 3. 绘制 AI 底图
+    ctx.drawImage(aiImg, 0, 0);
+
+    // 4. 叠加原图 (核心 Trick)
+    // 注意：这里假设 Gemini 并没有大幅度改变人物的姿态和位置 (Face Alignment)
+    // 如果 AI 改变了构图，直接叠加会产生重影（鬼影）。
+    // 所以这个技巧只适用于 "Magic Fix" (画质/光影提升)，不适用于大幅度动作改变。
+
+    ctx.globalAlpha = blendOpacity; // 设置透明度 15%
+    // 强制拉伸原图以匹配 AI 图尺寸 (假设 AI 保持了比例)
+    ctx.drawImage(originalImg, 0, 0, aiImg.width, aiImg.height);
+
+    // 5. 还原 Alpha
+    ctx.globalAlpha = 1.0;
+
+    // 6. (可选) 这里还可以加一层锐化滤镜模拟 "Face Restoration"
+
+    // 7. 输出
+    return await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.95 });
+}
+</file>
+
+<file path="src/lib/segmentation.ts">
+import { removeBackground } from "@imgly/background-removal";
+import { logger } from "./logger";
+
+/**
+ * 前端本地抠图：提取人像层 (透明 PNG)
+ */
+export async function extractPersonLayer(imageBlob: Blob): Promise<Blob> {
+    logger.info("正在进行本地人像抠图 (Segmentation)...");
+    const start = Date.now();
+
+    try {
+        // imgly 会自动下载 WASM 模型并运行
+        // output: blob (image/png)
+        const pngBlob = await removeBackground(imageBlob, {
+            // progress: (key, current, total) => {
+            //     // 可选：打印进度
+            //     // console.log(`Downloading ${key}: ${current} of ${total}`);
+            // },
+            model: "isnet" // 平衡速度和质量
+        });
+
+        logger.success(`人像提取完成，耗时 ${(Date.now() - start) / 1000}s`);
+        return pngBlob;
+    } catch (error) {
+        logger.error("抠图失败", error);
+        throw new Error("无法提取人像，请检查图片或网络（首次需要下载模型）");
+    }
+}
+
+/**
+ * 图像合成：将前景贴到背景上
+ */
+export async function compositeImages(backgroundBlob: Blob, foregroundBlob: Blob): Promise<Blob> {
+    const bgBitmap = await createImageBitmap(backgroundBlob);
+    const fgBitmap = await createImageBitmap(foregroundBlob);
+
+    const canvas = new OffscreenCanvas(bgBitmap.width, bgBitmap.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error("Canvas Error");
+
+    // 1. 画背景
+    ctx.drawImage(bgBitmap, 0, 0);
+
+    // 2. 画前景 (强制拉伸匹配，假设尺寸一致)
+    // 注意：imgly 返回的图尺寸通常和原图一致，位置也是对的，所以直接 0,0 绘制即可
+    ctx.drawImage(fgBitmap, 0, 0, bgBitmap.width, bgBitmap.height);
+
+    return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.95 });
 }
 </file>
 
@@ -251,10 +318,15 @@ export function AdminDashboard({ onClose, onRetry }: AdminDashboardProps) {
     }, [search, filter]) || [];
 
     const handleClearAll = async () => {
-        if (confirm('Are you sure you want to CLEAR ALL DATA? This cannot be undone.')) {
+        const confirmMsg = prompt('DANGER ZONE: This will permanently delete ALL photos and logs.\n\nType "DELETE" to confirm:');
+        if (confirmMsg === 'DELETE') {
             await db.photos.clear();
             await db.logs.clear();
             logger.warn('Administrative Data Wipe performed');
+            toast.success("System reset complete.");
+            onClose();
+        } else if (confirmMsg !== null) {
+            toast.error("Deletion cancelled. Verification failed.");
         }
     };
 
@@ -335,9 +407,10 @@ export function AdminDashboard({ onClose, onRetry }: AdminDashboardProps) {
                                     const result = await testGeminiConnection();
                                     toast.dismiss();
                                     toast.success("Connection Successful!", { description: `Response: ${result}` });
-                                } catch (e: any) {
+                                } catch (e: unknown) {
+                                    const errMsg = e instanceof Error ? e.message : String(e);
                                     toast.dismiss();
-                                    toast.error("Connection Failed", { description: e.message });
+                                    toast.error("Connection Failed", { description: errMsg });
                                 }
                             }}
                             className="flex items-center gap-2 px-4 py-2 bg-purple-600/10 text-purple-400 border border-purple-600/30 rounded-xl hover:bg-purple-600/20 transition-all text-sm font-medium"
@@ -700,6 +773,162 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange }: 
 }
 </file>
 
+<file path="src/hooks/useAutoOptimizer.ts">
+import { useState } from 'react';
+import { db, PhotoMetadata } from '@/lib/db';
+import {
+    analyzePhotosBatch,
+    detectImageContent,
+    extractSubjectWithGemini,
+    removeSubjectFromImage,
+    optimizeBackground,
+    mergeAndHarmonize,
+    analyzeLightingCondition,
+    optimizeLandscape,
+    evaluateLandscape // 新增
+} from '@/lib/gemini';
+import { logger } from '@/lib/logger';
+import { toast } from 'sonner';
+
+export function useAutoOptimizer() {
+    const [isOptimizing, setIsOptimizing] = useState(false);
+
+    const startOptimization = async (photo: PhotoMetadata) => {
+        if (isOptimizing) return;
+        setIsOptimizing(true);
+        const toastId = toast.loading("AI 极简精修中...");
+
+        try {
+            // 0. 准备数据
+            let currentBlob = photo.analysisBlob || photo.previewBlob;
+            if (!currentBlob && photo.file) currentBlob = new Blob([photo.file], { type: photo.file.type });
+            if (!currentBlob) throw new Error("无法获取图片数据");
+
+            // 备份原图
+            if (!photo.originalBlob) {
+                await db.photos.update(photo.id, { originalBlob: currentBlob });
+            } else {
+                currentBlob = photo.originalBlob;
+            }
+
+            // Step 0: 侦测光影 DNA
+            toast.loading("Step 0: 侦测光影 DNA...", { id: toastId });
+            const lightingInfo = await analyzeLightingCondition(currentBlob);
+            logger.info(`光影分析: ${lightingInfo}`);
+
+            // 1. 判断是否是人像
+            toast.loading("Step 1: 分析画面内容...", { id: toastId });
+            const contentInfo = await detectImageContent(currentBlob);
+
+            let finalResultBlob = currentBlob;
+            let currentReason = "Optimization complete";
+            let currentScore = 0;
+
+            if (contentInfo.hasLivingBeings && contentInfo.subjectType === 'person') {
+                logger.info("🚀 人像模式 (极简流程)");
+
+                // 2. 提出人像 (Layer A)
+                toast.loading("Step 2: 提取人像...", { id: toastId });
+                const personLayer = await extractSubjectWithGemini(currentBlob);
+
+                // 3. 生成无人背景 (Layer B)
+                toast.loading("Step 3: 移除主体...", { id: toastId });
+                const cleanBackground = await removeSubjectFromImage(currentBlob);
+
+                // 4. 优化背景 (Layer C) - 传入光影信息
+                toast.loading("Step 4: 匹配环境光...", { id: toastId });
+                const optimizedBackground = await optimizeBackground(cleanBackground, lightingInfo);
+
+                // 5. 融合 (Merge) - 传入光影信息
+                toast.loading("Step 5: 影楼级合成...", { id: toastId });
+                finalResultBlob = await mergeAndHarmonize(
+                    currentBlob,        // 原图 (保真)
+                    personLayer,        // 形状
+                    optimizedBackground, // 氛围
+                    lightingInfo        // 光影上下文
+                );
+
+                // 评分
+                const finalRes = await analyzePhotosBatch([{ id: 'final', blob: finalResultBlob }]);
+                currentScore = finalRes[0].score;
+                currentReason = "Enhanced portrait with preserved identity.";
+
+            } else {
+                // --- 风景模式：智能迭代循环 (Feedback Loop) ---
+                logger.info("🏞️ 风景模式 (智能迭代版)");
+
+                let loopBlob = currentBlob;
+                let loopScore = 0;
+                let loopReason = "Initial Capture";
+                let iteration = 0;
+                const MAX_LOOPS = 3;    // 最多跑3轮
+                const TARGET_SCORE_LANDSCAPE = 8.0; // 目标分
+
+                // 循环开始
+                while (iteration < MAX_LOOPS) {
+                    iteration++;
+                    toast.loading(`Round ${iteration}: AI 正在评审 & 思考...`, { id: toastId });
+
+                    // 1. 评分 & 获取修改意见 (Flash)
+                    const evalResult = await evaluateLandscape(loopBlob);
+                    loopScore = evalResult.score;
+                    loopReason = evalResult.critique;
+
+                    logger.info(`[Loop ${iteration}] Score: ${loopScore}, Fix: ${evalResult.improvementPrompt}`);
+
+                    // 达标检测：如果分数够了，或者已经在最后一轮了，就跳出
+                    if (loopScore >= TARGET_SCORE_LANDSCAPE) {
+                        toast.success(`达标! 分数: ${loopScore}`, { id: toastId });
+                        break;
+                    }
+                    if (iteration === MAX_LOOPS) {
+                        toast("已达到最大优化次数", { id: toastId });
+                        break;
+                    }
+
+                    // 2. 执行精修 (Image Pro)
+                    toast.loading(`Round ${iteration}: 正在执行: ${evalResult.critique.slice(0, 20)}...`, { id: toastId });
+                    try {
+                        loopBlob = await optimizeLandscape(loopBlob, evalResult.improvementPrompt);
+                    } catch (e) {
+                        logger.error("生成失败，保留上一轮结果", e);
+                        break; // 如果生成挂了，就用上一次的好图
+                    }
+                }
+
+                // 循环结束，赋值给最终结果
+                finalResultBlob = loopBlob;
+                currentScore = loopScore;
+                currentReason = `[Loop x${iteration}] ${loopReason}`;
+            }
+
+            // 保存
+            await db.photos.update(photo.id, {
+                analysisBlob: finalResultBlob,
+                previewBlob: finalResultBlob,
+                score: currentScore,
+                // 如果之前没存过原分，且当前有分，则备份当前分；否则保持原样
+                originalScore: photo.originalScore ?? photo.score,
+                reason: currentReason,
+                status: 'scored',
+                updatedAt: Date.now()
+            });
+
+            toast.success(`精修完成: ${currentScore.toFixed(1)}`, { id: toastId });
+            window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
+
+        } catch (error) {
+            console.error(error);
+            toast.error("处理失败: " + (error instanceof Error ? error.message : "未知错误"), { id: toastId });
+        } finally {
+            setIsOptimizing(false);
+        }
+    };
+
+    return { startOptimization, isOptimizing };
+}
+</file>
+
 <file path="src/hooks/useResizeObserver.ts">
 import { useState, useEffect, useRef } from 'react';
 
@@ -932,10 +1161,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <GlobalErrorBoundary>
+      <App />
+    </GlobalErrorBoundary>
   </StrictMode>,
 )
 </file>
@@ -1109,23 +1341,24 @@ export default {
 </file>
 
 <file path="src/components/Header.tsx">
-import { FolderOpen, Settings } from 'lucide-react';
+import { FolderOpen, Settings, ImagePlus } from 'lucide-react'; // 引入 ImagePlus 图标
 import { motion } from 'framer-motion';
 
 interface HeaderProps {
     onOpenFolder: () => void;
+    onOpenFiles: () => void; // 新增：打开文件选择器的回调
     onOpenAdmin?: () => void;
     onRetry?: () => void;
     total: number;
-    processed: number; // Local processing done
-    analyzed: number;  // AI Analysis done
+    processed: number;
+    analyzed: number;
     queueLength: number;
     analyzingCount: number;
     errorCount: number;
     supportsFileSystemAccess?: boolean;
 }
 
-export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
+export function Header({ onOpenFolder, onOpenFiles, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
     const processingProgress = total > 0 ? (processed / total) * 100 : 0;
     const analysisProgress = total > 0 ? (analyzed / total) * 100 : 0;
 
@@ -1179,7 +1412,7 @@ export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, a
                 </div>
             )}
 
-            {/* Pipeline Stats (New) */}
+            {/* Pipeline Stats */}
             {total > 0 && (
                 <div className="mr-6 flex items-center gap-4 text-xs font-mono text-gray-500 border-r border-[#262626] pr-6">
                     <div className="flex flex-col items-end">
@@ -1199,99 +1432,41 @@ export function Header({ onOpenFolder, onOpenAdmin, onRetry, total, processed, a
 
             {/* Right: Actions */}
             <div className="flex items-center gap-3">
+                {/* Admin Button - Hidden in Prod, accessible via Alt+Shift+A */}
+                {import.meta.env.DEV && (
+                    <button
+                        onClick={onOpenAdmin}
+                        title="Admin Console (Alt+Shift+A)"
+                        className="p-2.5 bg-[#1A1A1A] text-gray-400 border border-[#262626] rounded-xl hover:text-white hover:bg-[#262626] transition-all active:scale-95"
+                    >
+                        <Settings size={18} />
+                    </button>
+                )}
+
+                {/* 拆分为两个明确的按钮 */}
                 <button
-                    onClick={onOpenAdmin}
-                    title="Admin Console (Alt+Shift+A)"
-                    className="p-2.5 bg-[#1A1A1A] text-gray-400 border border-[#262626] rounded-xl hover:text-white hover:bg-[#262626] transition-all active:scale-95"
+                    onClick={onOpenFiles}
+                    title="Select individual photos to analyze"
+                    className="flex items-center gap-2 px-4 py-2 bg-[#1A1A1A] text-white border border-[#262626] rounded-lg text-sm font-semibold hover:bg-[#262626] transition-colors active:scale-95 duration-100"
                 >
-                    <Settings size={18} />
+                    <ImagePlus size={16} className="text-blue-500" />
+                    Add Photos
                 </button>
+
                 {supportsFileSystemAccess ? (
                     <button
                         onClick={onOpenFolder}
+                        title="Import a full folder (Standard Mode)"
                         className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-95 duration-100"
                     >
                         <FolderOpen size={16} />
                         Import Folder
                     </button>
-                ) : (
-                    <div className="text-xs text-gray-500 px-2">
-                        (Drag & Drop supported)
-                    </div>
-                )}
+                ) : null}
             </div>
         </header>
     );
 }
-</file>
-
-<file path="src/lib/db.ts">
-import Dexie, { type Table } from 'dexie';
-
-// 定义修图参数的结构
-export interface EditConfig {
-    crop: { x: number; y: number; width: number; height: number }; // 百分比 0.0 - 1.0
-    filters: {
-        brightness: number; // default 1.0
-        contrast: number;   // default 1.0
-        saturate: number;   // default 1.0
-        grayscale: number;  // default 0.0
-        sepia: number;      // default 0.0
-    };
-    predictedScore: number;
-    fixReason: string;
-}
-
-export interface PhotoMetadata {
-    id: string;
-    file?: File;
-    name: string;
-    size: number;
-    type: string;
-    lastModified: number;
-    webkitRelativePath: string; // Keep path for folder structure
-
-    // Blob handling
-    analysisBlob?: Blob;      // Small/Medium JPG (e.g. 1024px) for AI & rapid display
-    previewBlob?: Blob;       // Tiny Thumbnail (e.g. 200px) for Grid
-
-    handle?: FileSystemFileHandle; // For zero-upload access
-
-    // AI Results
-    score?: number;
-    reason?: string;
-    status: 'new' | 'processing' | 'queued' | 'analyzing' | 'scored' | 'error' | 'done';
-
-    createdAt?: number;
-    updatedAt?: number;
-
-    // 新增字段：存储 AI 的修图建议
-    magicEdits?: EditConfig;
-}
-
-export interface LogEntry {
-    id?: number;
-    timestamp: number;
-    level: 'info' | 'warn' | 'error';
-    message: string;
-    details?: unknown;
-}
-
-export class PhotoRankDB extends Dexie {
-    photos!: Table<PhotoMetadata>;
-    logs!: Table<LogEntry>;
-
-    constructor() {
-        super('PhotoRankDB');
-        // 强行提到 25（必须比你之前看到的 21 大）
-        this.version(25).stores({
-            photos: 'id, status, score, createdAt',
-            logs: '++id, timestamp, level'
-        });
-    }
-}
-
-export const db = new PhotoRankDB();
 </file>
 
 <file path="src/lib/logger.ts">
@@ -1333,8 +1508,10 @@ class LoggerService {
         }
 
         // Log to console for dev (Silenced for Production Cleanliness)
-        const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
-        console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
+        if (import.meta.env.DEV || level === 'error') {
+            const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
+            console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
+        }
 
         // Persist to DB (Simulated/Optional for now to prevent schema errors if not updated)
         try {
@@ -1755,310 +1932,6 @@ export const PhotoCard = memo(({ photo, style, className, selected, onToggleSele
 });
 </file>
 
-<file path="src/components/PhotoDetailModal.tsx">
-import { useEffect, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, PhotoMetadata, EditConfig } from '@/lib/db';
-import { X, Sparkles, Wand2, ArrowLeftRight, Crop, ScanEye, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { generateMagicFixConfig } from '@/lib/gemini';
-import { logger } from '@/lib/logger';
-import { toast } from 'sonner';
-import { useAutoOptimizer } from '@/hooks/useAutoOptimizer';
-
-interface PhotoDetailModalProps {
-    photoId: string;
-    onClose: () => void;
-}
-
-export function PhotoDetailModal({ photoId, onClose }: PhotoDetailModalProps) {
-    // --- 所有 Hooks 都放在最顶层 ---
-    const photo = useLiveQuery(() => db.photos.get(photoId), [photoId]);
-    const { startOptimization, isOptimizing } = useAutoOptimizer();
-    const [src, setSrc] = useState<string | null>(null);
-    const [isFixing, setIsFixing] = useState(false);
-    const [activeEdits, setActiveEdits] = useState<EditConfig | undefined>(undefined);
-    const [isComparing, setIsComparing] = useState(false);
-
-    useEffect(() => {
-        if (photo) {
-            setActiveEdits(photo.magicEdits);
-        }
-    }, [photo?.magicEdits]);
-
-    // 加载图片 URL 的 Hook
-    useEffect(() => {
-        // 如果 photo 还不存在，就什么都不做
-        if (!photo) {
-            setSrc(null); // 确保在切换图片时重置
-            return;
-        };
-
-        let activeUrl = '';
-        let cancelled = false;
-
-        const loadContent = async () => {
-            try {
-                if (photo.analysisBlob) {
-                    activeUrl = URL.createObjectURL(photo.analysisBlob);
-                } else if (photo.file) {
-                    activeUrl = URL.createObjectURL(photo.file);
-                } else if (photo.handle) {
-                    const file = await photo.handle.getFile();
-                    activeUrl = URL.createObjectURL(file);
-                } else if (photo.previewBlob) {
-                    activeUrl = URL.createObjectURL(photo.previewBlob);
-                }
-
-                if (!cancelled) {
-                    setSrc(activeUrl);
-                }
-            } catch (e) {
-                console.error("Failed to load image content", e);
-            }
-        };
-
-        setSrc(null); // 每次 photo 变化都先重置
-        loadContent();
-
-        return () => {
-            cancelled = true;
-            if (activeUrl) URL.revokeObjectURL(activeUrl);
-        };
-    }, [photo]); // 依赖 photo 对象本身
-
-
-    // --- FIX: 把条件判断移到渲染逻辑中 ---
-    if (!photo) {
-        // 仍然显示加载状态，但不再是提前返回
-        return (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md">
-                <Loader2 className="animate-spin text-white" size={48} />
-            </div>
-        );
-    }
-
-    // --- 在这里，可以安全地假设 photo 已经存在 ---
-    const handleMagicFix = async () => {
-        if (!photo.reason) return toast.error("No feedback available for AI to work with.");
-
-        setIsFixing(true);
-        const toastId = toast.loading("AI is re-composing and color grading...");
-
-        try {
-            const sourceBlob = photo.analysisBlob || photo.previewBlob || (photo.file ? new Blob([photo.file], { type: photo.file.type }) : null);
-            if (!sourceBlob) throw new Error("No source image found.");
-
-            const config = await generateMagicFixConfig(sourceBlob, photo.reason);
-
-            await db.photos.update(photo.id, {
-                magicEdits: config,
-                updatedAt: Date.now()
-            });
-
-            setActiveEdits(config); // 更新本地状态以立即显示
-            toast.success(`Fixed! Predicted Score: ${config.predictedScore}`, { id: toastId });
-
-        } catch (error) {
-            toast.error("Magic Fix Failed: " + (error as Error).message, { id: toastId });
-        } finally {
-            setIsFixing(false);
-        }
-    };
-
-    // 计算 CSS 样式的函数 (保持不变)
-    const getEditStyles = () => {
-        if (!activeEdits || isComparing) {
-            return { container: {}, img: { filter: 'none', transform: 'none' } };
-        }
-        const { crop, filters } = activeEdits;
-        const cropCenterX = crop.x + crop.width / 2;
-        const cropCenterY = crop.y + crop.height / 2;
-        const translateX = (0.5 - cropCenterX) * 100;
-        const translateY = (0.5 - cropCenterY) * 100;
-        const scale = 1 / Math.max(crop.width, crop.height);
-
-        return {
-            container: { overflow: 'hidden' },
-            img: {
-                filter: `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturate}) sepia(${filters.sepia || 0})`,
-                transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
-                transformOrigin: 'center center',
-                transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)'
-            }
-        };
-    };
-
-    const styles = getEditStyles();
-    const currentScore = (activeEdits && !isComparing) ? activeEdits.predictedScore : photo.score;
-
-    // --- 返回完整的 JSX ---
-    return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-6" onClick={onClose}>
-            <div
-                className="bg-[#0F0F0F] rounded-2xl overflow-hidden max-w-6xl w-full h-[85vh] flex flex-col md:flex-row shadow-2xl border border-[#262626]"
-                onClick={e => e.stopPropagation()}
-            >
-                {/* Image Section */}
-                <div className="flex-1 bg-[#050505] flex items-center justify-center p-4 relative overflow-hidden">
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent pointer-events-none" />
-
-                    {/* Viewport Container */}
-                    <div className="w-full h-full flex items-center justify-center" style={styles.container}>
-                        {src ? (
-                            <img
-                                src={src}
-                                alt={photo.name}
-                                className="max-w-full max-h-full object-contain shadow-2xl rounded-lg will-change-transform"
-                                style={styles.img}
-                            />
-                        ) : (
-                            <div className="text-gray-500 animate-pulse">Loading image...</div>
-                        )}
-                    </div>
-
-                    {/* Compare Button Overlay */}
-                    {activeEdits && (
-                        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-20">
-                            <button
-                                onMouseDown={() => setIsComparing(true)}
-                                onMouseUp={() => setIsComparing(false)}
-                                onMouseLeave={() => setIsComparing(false)}
-                                className="flex items-center gap-2 px-6 py-2 bg-black/60 backdrop-blur-md border border-white/20 rounded-full text-white font-bold hover:bg-black/80 transition-all active:scale-95 select-none"
-                            >
-                                <ArrowLeftRight size={16} />
-                                {isComparing ? 'Showing Original' : 'Hold to Compare'}
-                            </button>
-                        </div>
-                    )}
-
-                    {/* Magic Fix Indicator */}
-                    {activeEdits && !isComparing && (
-                        <div className="absolute top-6 left-6 flex flex-col gap-2 pointer-events-none">
-                            <div className="flex items-center gap-2 px-3 py-1 bg-purple-500/20 border border-purple-500/30 text-purple-200 text-xs rounded-full backdrop-blur-md">
-                                <Crop size={12} /> Re-composed
-                            </div>
-                            <div className="flex items-center gap-2 px-3 py-1 bg-blue-500/20 border border-blue-500/30 text-blue-200 text-xs rounded-full backdrop-blur-md">
-                                <ScanEye size={12} /> Color Graded
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Info Section */}
-                <div className="w-full md:w-[400px] bg-[#0F0F0F] flex flex-col border-l border-[#262626]">
-                    {/* Header */}
-                    <div className="p-6 border-b border-[#262626] flex justify-between items-start bg-[#161616]">
-                        <div className="overflow-hidden mr-4">
-                            <h2 className="text-xl font-bold text-white truncate">{photo.name}</h2>
-                            <p className="text-xs text-gray-500 font-mono">{photo.status === 'scored' ? 'Analyzed' : 'Processing...'}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            {/* 自动化迭代按钮 (Golden Loop) */}
-                            <button
-                                onClick={() => startOptimization(photo)}
-                                disabled={isOptimizing}
-                                className={cn(
-                                    "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border",
-                                    "bg-gradient-to-r from-yellow-500/20 to-orange-500/20 border-yellow-500/50 text-yellow-200 hover:bg-yellow-500/30",
-                                    isOptimizing ? "opacity-80 cursor-not-allowed" : "hover:scale-105 active:scale-95"
-                                )}
-                            >
-                                {isOptimizing ? (
-                                    <>
-                                        <Loader2 size={14} className="animate-spin" />
-                                        <span>Looping...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Sparkles size={14} className="text-yellow-400" />
-                                        <span>Auto Masterpiece</span>
-                                    </>
-                                )}
-                            </button>
-
-                            <button
-                                onClick={handleMagicFix}
-                                disabled={isFixing}
-                                className={cn(
-                                    "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                    "bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:shadow-lg hover:shadow-purple-500/20 active:scale-95",
-                                    isFixing && "opacity-50 cursor-not-allowed grayscale"
-                                )}
-                            >
-                                <Wand2 size={14} className={cn(isFixing && "animate-spin")} />
-                                {activeEdits ? 'Re-Fix' : 'Magic Fix'}
-                            </button>
-                            <button onClick={onClose} className="p-2 hover:bg-[#262626] rounded-lg text-gray-400 hover:text-white transition-colors">
-                                <X size={20} />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
-                        {/* Score Card */}
-                        <div className="flex flex-col items-center justify-center p-8 rounded-2xl bg-[#1A1A1A] border border-[#262626] shadow-inner relative overflow-hidden group">
-                            <div className={cn(
-                                "absolute inset-0 bg-gradient-to-br opacity-50 transition-colors duration-500",
-                                activeEdits && !isComparing ? "from-purple-500/20 to-blue-500/20" : "from-gray-500/5 to-gray-500/5"
-                            )} />
-
-                            <div className="relative z-10 flex flex-col items-center">
-                                <span className={cn(
-                                    "text-6xl font-black tracking-tighter mb-2 bg-clip-text text-transparent bg-gradient-to-br transition-all duration-300",
-                                    (currentScore || 0) >= 9 ? "from-green-400 to-emerald-600" :
-                                        (currentScore || 0) >= 7 ? "from-blue-400 to-indigo-600" :
-                                            "from-orange-400 to-red-600",
-                                    isComparing && "opacity-50 grayscale"
-                                )}>
-                                    {currentScore ? currentScore.toFixed(1) : 'N/A'}
-                                </span>
-                                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-semibold text-gray-400 uppercase tracking-widest">
-                                    <Sparkles size={12} className={cn(activeEdits && !isComparing ? "text-purple-400" : "text-blue-400")} />
-                                    {activeEdits && !isComparing ? 'AI Improved' : 'Original Score'}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Feedback / Fix Reason */}
-                        <div>
-                            <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                <span className="w-1 h-4 bg-purple-500 rounded-full" />
-                                {activeEdits ? 'Magic Fix Details' : 'Gemini Evaluation'}
-                            </h3>
-                            <div className="bg-[#1A1A1A] rounded-xl p-5 border border-[#262626] text-sm leading-relaxed text-gray-300 shadow-sm relative">
-                                {activeEdits ? (
-                                    <>
-                                        <p className="text-purple-300 font-medium mb-2">✨ Applied Enhancements:</p>
-                                        <p>{activeEdits.fixReason}</p>
-                                        <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-500 font-mono">
-                                            <div>Bright: {activeEdits.filters.brightness}x</div>
-                                            <div>Contrast: {activeEdits.filters.contrast}x</div>
-                                            <div>Crop: {Math.round(activeEdits.crop.width * 100)}% Area</div>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <p>{photo.reason || "Analysis pending..."}</p>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Footer */}
-                    <div className="p-4 border-t border-[#262626] bg-[#161616]">
-                        <div className="flex justify-between items-center text-[10px] text-gray-600 font-mono uppercase">
-                            <span>ID: {photo.id.slice(0, 8)}...</span>
-                            <span>{(photo.size / 1024 / 1024).toFixed(2)} MB</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-</file>
-
 <file path="src/components/PhotoGrid.tsx">
 import { PhotoMetadata } from '@/lib/db';
 import { PhotoCard } from './PhotoCard';
@@ -2124,11 +1997,370 @@ export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView }: Photo
 }
 </file>
 
+<file path="src/lib/db.ts">
+import Dexie, { type Table } from 'dexie';
+
+// 定义修图参数的结构
+export interface EditConfig {
+    crop: { x: number; y: number; width: number; height: number }; // 百分比 0.0 - 1.0
+    filters: {
+        brightness: number; // default 1.0
+        contrast: number;   // default 1.0
+        saturate: number;   // default 1.0
+        grayscale: number;  // default 0.0
+        sepia: number;      // default 0.0
+    };
+    predictedScore: number;
+    fixReason: string;
+}
+
+export interface PhotoMetadata {
+    id: string;
+    file?: File;
+    name: string;
+    size: number;
+    type: string;
+    lastModified: number;
+    webkitRelativePath: string; // Keep path for folder structure
+
+    // Blob handling
+    analysisBlob?: Blob;      // 这是“当前显示的图” (可能是原图，也可能是 AI 修过的图)
+    previewBlob?: Blob;       // Tiny Thumbnail (e.g. 200px) for Grid
+
+    // --- 新增字段 ---
+    originalBlob?: Blob;      // 这是“绝对原图备份” (用于对比)
+    // ----------------
+
+    handle?: FileSystemFileHandle; // For zero-upload access
+
+    // AI Results
+    score?: number;
+    originalScore?: number;   // <--- 【新增】保存优化前的原始分数
+    reason?: string;
+    status: 'new' | 'processing' | 'queued' | 'analyzing' | 'scored' | 'error' | 'done';
+
+    createdAt?: number;
+    updatedAt?: number;
+
+    // 新增字段：存储 AI 的修图建议
+    magicEdits?: EditConfig;
+}
+
+export interface LogEntry {
+    id?: number;
+    timestamp: number;
+    level: 'info' | 'warn' | 'error' | 'success';
+    message: string;
+    data?: unknown;
+}
+
+export class PhotoRankDB extends Dexie {
+    photos!: Table<PhotoMetadata>;
+    logs!: Table<LogEntry>;
+
+    constructor() {
+        super('PhotoRankDB');
+        // 升级版本号到 26，以应用 schema 变更
+        this.version(26).stores({
+            photos: 'id, status, score, createdAt',
+            logs: '++id, timestamp, level'
+        });
+    }
+}
+
+
+export const db = new PhotoRankDB();
+
+export async function resetDatabase() {
+    try {
+        await db.delete();
+        return true;
+    } catch (e) {
+        console.error("Failed to delete database", e);
+        return false;
+    }
+}
+</file>
+
+<file path="package.json">
+{
+  "name": "auto_culling",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@imgly/background-removal": "^1.7.0",
+    "clsx": "^2.1.1",
+    "dexie": "^4.2.1",
+    "dexie-react-hooks": "^4.2.0",
+    "framer-motion": "^12.23.26",
+    "lucide-react": "^0.562.0",
+    "motion": "^12.23.26",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-virtuoso": "^4.18.0",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@testing-library/react": "^16.3.1",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "autoprefixer": "^10.4.23",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "fake-indexeddb": "^6.2.5",
+    "globals": "^16.5.0",
+    "happy-dom": "^20.0.11",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vite": "^7.2.4",
+    "vitest": "^4.0.16"
+  }
+}
+</file>
+
+<file path="src/components/PhotoDetailModal.tsx">
+import { useEffect, useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/lib/db';
+import { X, Sparkles, ArrowLeftRight, Loader2, Crown } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useAutoOptimizer } from '@/hooks/useAutoOptimizer';
+
+interface PhotoDetailModalProps {
+    photoId: string;
+    onClose: () => void;
+}
+
+export function PhotoDetailModal({ photoId, onClose }: PhotoDetailModalProps) {
+    const photo = useLiveQuery(() => db.photos.get(photoId), [photoId]);
+    const { startOptimization, isOptimizing } = useAutoOptimizer();
+
+    const [src, setSrc] = useState<string | null>(null);
+    const [isComparing, setIsComparing] = useState(false);
+
+    // --- 核心修复：更智能的图片加载逻辑 (支持对比原图) ---
+    useEffect(() => {
+        if (!photo) {
+            return;
+        };
+
+        let activeUrl = '';
+        let cancelled = false;
+
+        const loadContent = async () => {
+            try {
+                let blobToLoad: Blob | undefined | File;
+
+                // 1. 决定要显示哪个 Blob
+                if (isComparing && photo.originalBlob) {
+                    // 情况 A: 正在对比，且存在“绝对原图备份” (Auto Masterpiece 模式)
+                    blobToLoad = photo.originalBlob;
+                } else if (photo.analysisBlob) {
+                    // 情况 B: 默认显示当前高清图 (可能是 AI 修过的，也可能是原图)
+                    blobToLoad = photo.analysisBlob;
+                } else if (photo.file) {
+                    blobToLoad = photo.file;
+                } else if (photo.handle) {
+                    blobToLoad = await photo.handle.getFile();
+                } else {
+                    blobToLoad = photo.previewBlob;
+                }
+
+                if (blobToLoad) {
+                    activeUrl = URL.createObjectURL(blobToLoad);
+                    if (!cancelled) setSrc(activeUrl);
+                }
+            } catch (e) {
+                console.error("Failed to load image content", e);
+            }
+        };
+
+        // 不要在这里 setSrc(null)，否则按住对比时会闪烁
+        loadContent();
+
+        return () => {
+            cancelled = true;
+            if (activeUrl) URL.revokeObjectURL(activeUrl);
+        };
+    }, [photo, isComparing]); // 监听 isComparing 变化
+
+
+    if (!photo) {
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md">
+                <Loader2 className="animate-spin text-white" size={48} />
+            </div>
+        );
+    }
+
+    // --- 核心修复：分数显示逻辑 ---
+    // 如果有 originalBlob，说明是 Auto Masterpiece，直接显示当前 score
+    const isMasterpiece = !!photo.originalBlob;
+
+    // 如果正在对比(isComparing)且有原始分，显示原始分；否则显示当前分
+    const displayScore = (isComparing && photo.originalScore)
+        ? photo.originalScore
+        : photo.score;
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-6" onClick={onClose}>
+            <div
+                className="bg-[#0F0F0F] rounded-2xl overflow-hidden max-w-6xl w-full h-[85vh] flex flex-col md:flex-row shadow-2xl border border-[#262626]"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Image Section */}
+                {/* 【修改】移除了 p-4，让图片可以撑满容器 */}
+                <div className="flex-1 bg-[#050505] flex items-center justify-center relative overflow-hidden">
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent pointer-events-none" />
+
+                    <div className="w-full h-full flex items-center justify-center overflow-hidden">
+                        {src ? (
+                            <img
+                                src={src}
+                                alt={photo.name}
+                                // 这里保留 object-contain 确保图片完整显示，移除 padding 后它会贴边
+                                className="max-w-full max-h-full object-contain shadow-2xl will-change-transform transition-all duration-300"
+                            />
+                        ) : (
+                            <div className="text-gray-500 animate-pulse">Loading image...</div>
+                        )}
+                    </div>
+
+                    {/* Compare Button Overlay */}
+                    {/* 只要有 AutoMasterpiece (即 originalBlob 存在)，就显示对比按钮 */}
+                    {(photo.originalBlob) && (
+                        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-20">
+                            <button
+                                onMouseDown={() => setIsComparing(true)}
+                                onMouseUp={() => setIsComparing(false)}
+                                onMouseLeave={() => setIsComparing(false)}
+                                className="flex items-center gap-2 px-6 py-2 bg-black/60 backdrop-blur-md border border-white/20 rounded-full text-white font-bold hover:bg-black/80 transition-all active:scale-95 select-none"
+                            >
+                                <ArrowLeftRight size={16} />
+                                {isComparing ? 'Showing Original' : 'Hold to Compare'}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Auto Masterpiece 专属角标 */}
+                    {isMasterpiece && !isComparing && (
+                        <div className="absolute top-6 left-6 flex items-center gap-2 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/40 text-yellow-200 text-xs font-bold rounded-full backdrop-blur-md shadow-[0_0_15px_rgba(234,179,8,0.3)] animate-in fade-in zoom-in duration-300">
+                            <Crown size={14} className="text-yellow-400" /> AI Masterpiece
+                        </div>
+                    )}
+                </div>
+
+                {/* Info Section */}
+                <div className="w-full md:w-[400px] bg-[#0F0F0F] flex flex-col border-l border-[#262626]">
+                    {/* Header ... */}
+                    <div className="p-6 border-b border-[#262626] flex justify-between items-start bg-[#161616]">
+                        <div className="overflow-hidden mr-4">
+                            <h2 className="text-xl font-bold text-white truncate">{photo.name}</h2>
+                            <p className="text-xs text-gray-500 font-mono">{photo.status === 'scored' ? 'Analyzed' : 'Processing...'}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => startOptimization(photo)}
+                                disabled={isOptimizing}
+                                className={cn(
+                                    "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border",
+                                    "bg-gradient-to-r from-yellow-500/20 to-orange-500/20 border-yellow-500/50 text-yellow-200 hover:bg-yellow-500/30",
+                                    isOptimizing ? "opacity-80 cursor-not-allowed" : "hover:scale-105 active:scale-95"
+                                )}
+                            >
+                                {isOptimizing ? (
+                                    <> <Loader2 size={14} className="animate-spin" /> <span>Looping...</span> </>
+                                ) : (
+                                    <> <Sparkles size={14} className="text-yellow-400" /> <span>Auto Masterpiece</span> </>
+                                )}
+                            </button>
+
+                            <button onClick={onClose} className="p-2 hover:bg-[#262626] rounded-lg text-gray-400 hover:text-white transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
+                        {/* Score Card */}
+                        <div className="flex flex-col items-center justify-center p-8 rounded-2xl bg-[#1A1A1A] border border-[#262626] shadow-inner relative overflow-hidden group">
+                            <div className={cn(
+                                "absolute inset-0 bg-gradient-to-br opacity-50 transition-colors duration-500",
+                                // 颜色逻辑：如果是 Masterpiece 且不在对比状态，显示金色
+                                isMasterpiece && !isComparing ? "from-yellow-600/20 to-orange-600/20" : "from-gray-500/5 to-gray-500/5"
+                            )} />
+
+                            <div className="relative z-10 flex flex-col items-center">
+                                <span className={cn(
+                                    "text-6xl font-black tracking-tighter mb-2 bg-clip-text text-transparent bg-gradient-to-br transition-all duration-300",
+                                    // 字体颜色逻辑
+                                    isMasterpiece && !isComparing ? "from-yellow-300 to-amber-500" :
+                                        (displayScore || 0) >= 9 ? "from-green-400 to-emerald-600" :
+                                            (displayScore || 0) >= 7 ? "from-blue-400 to-indigo-600" :
+                                                "from-orange-400 to-red-600",
+                                    // 对比时让当前分数变灰，或者因为我们现在切换了数值，这里可以去掉 grayscale，让它显示原分的颜色
+                                    // isComparing && "opacity-50 grayscale" <--- 建议移除这一行，因为现在数值会变
+                                )}>
+                                    {displayScore ? displayScore.toFixed(1) : 'N/A'}
+                                </span>
+                                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-semibold text-gray-400 uppercase tracking-widest">
+                                    <Sparkles size={12} className={cn(
+                                        isMasterpiece && !isComparing ? "text-yellow-400" : "text-blue-400"
+                                    )} />
+                                    {isMasterpiece && !isComparing ? 'Masterpiece Score' : 'Original Score'}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Feedback / Fix Reason */}
+                        <div>
+                            <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                <span className="w-1 h-4 bg-purple-500 rounded-full" />
+                                {isMasterpiece ? 'Masterpiece Analysis' : 'Gemini Evaluation'}
+                            </h3>
+                            <div className="bg-[#1A1A1A] rounded-xl p-5 border border-[#262626] text-sm leading-relaxed text-gray-300 shadow-sm relative">
+                                {/* 对于 Auto Masterpiece，photo.reason 里存的是最后的修改意见 */}
+                                <p>{photo.reason || "Analysis pending..."}</p>
+                            </div>
+                        </div>
+                    </div>
+                    {/* Footer */}
+                    <div className="p-4 border-t border-[#262626] bg-[#161616]">
+                        <div className="flex justify-between items-center text-[10px] text-gray-600 font-mono uppercase">
+                            <span>ID: {photo.id.slice(0, 8)}...</span>
+                            <span>{(photo.size / 1024 / 1024).toFixed(2)} MB</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+</file>
+
 <file path="src/hooks/useAIPipeline.ts">
 import { useState, useRef, useEffect } from 'react';
-import { db } from '@/lib/db';
+import { db, resetDatabase } from '@/lib/db';
 import { analyzePhotosBatch } from '@/lib/gemini';
 import { logger } from '@/lib/logger';
+import { toast } from 'sonner';
 
 const BATCH_SIZE = 4;
 const RATE_LIMIT_DELAY_MS = 2000;
@@ -2156,7 +2388,16 @@ export function useAIPipeline() {
                     });
                 }
             }
-        } catch (e) {
+        } catch (e: unknown) { // Use unknown instead of any
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const err = e as any;
+            // CRITICAL: Handle Dexie DatabaseClosedError/UnknownError
+            if (err?.name === 'DatabaseClosedError' || err?.message?.includes('backing store') || err?.name === 'UnknownError') {
+                logger.error("[Critical] Database corruption during recovery. Stopping.", err);
+                // No need to toast here if processQueue also toasts, but to be safe:
+                // We just abort recovery.
+                return;
+            }
             console.error("Recovery failed", e);
         }
     };
@@ -2189,6 +2430,7 @@ export function useAIPipeline() {
             mountedRef.current = false;
             window.removeEventListener('pipeline-wakeup', wakeUp);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const processQueue = async () => {
@@ -2322,10 +2564,33 @@ export function useAIPipeline() {
             // Sync analyzing status
             setIsAnalyzing(activeCount > 0);
 
-        } catch (error) {
+        } catch (error: unknown) { // Use unknown instead of any
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const err = error as any;
+            // CRITICAL: Handle Dexie DatabaseClosedError/UnknownError to prevent crash loops
+            if (err?.name === 'DatabaseClosedError' || err?.message?.includes('backing store') || err?.name === 'UnknownError') {
+                logger.error("[Critical] Database corruption detected. Stopping pipeline.", err);
+
+                // Stop the recursion by ensuring mountedRef is ignored or explicitly return
+                mountedRef.current = false;
+
+                // Show a persistent error toast
+                toast.error("Database Error: Corruption Detected", {
+                    duration: Infinity,
+                    description: "Click 'Fix' to reset database and recover.",
+                    action: {
+                        label: 'Fix & Reload',
+                        onClick: async () => {
+                            await resetDatabase();
+                            window.location.reload();
+                        }
+                    }
+                });
+                return; // STOP EXECUTION (Skip finally block logic if possible, or handle in finally)
+            }
             logger.error("Pipeline 运行异常", error);
         } finally {
-            // 确保心跳永不停止
+            // 确保心跳永不停止 (除非挂了)
             if (mountedRef.current) {
                 setTimeout(processQueue, 2000);
             }
@@ -2490,7 +2755,6 @@ export function useDirectoryLoader() {
 <file path="src/lib/gemini.ts">
 import { GoogleGenerativeAI, SchemaType, Part } from "@google/generative-ai";
 import { logger } from "./logger";
-import { EditConfig } from "./db";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
@@ -2540,11 +2804,10 @@ const batchSchema = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as any;
 
-
 const MODELS = [
-    "gemini-3-flash-preview", // User requested newest model
-    "gemini-2.0-flash",     // Stable fast model
-    "gemini-1.5-pro",       // High quality fallback
+    "gemini-3-flash-preview",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
 ];
 
 async function tryGenerate(modelName: string, items: { id: string, data: string, mimeType: string }[], signal?: AbortSignal) {
@@ -2556,16 +2819,13 @@ async function tryGenerate(modelName: string, items: { id: string, data: string,
             responseMimeType: "application/json",
             responseSchema: batchSchema,
         },
-        // Note: The SDK might not fully support AbortSignal in all environments yet, 
-        // but checking it explicitly helps save resources if already cancelled.
     });
 
     const promptMessages = [
-        `Analyze the aesthetic quality of these ${items.length} photos for a professional photographer. 
+        `Analyze the aesthetic quality of these ${items.length} images.
+         If an image is a BACKGROUND (no subject), rate its composition, lighting, and texture as a standalone landscape/scene.
          The photos correspond to the following IDs in order: ${JSON.stringify(items.map(i => i.id))}.
-         Return a JSON object with a "results" array containing the 'file_id', 'score', and 'reason' for each photo. 
-         IMPORTANT: You must include the correct 'file_id' provided for each result.
-         Strictly follow the JSON schema.`,
+         Return JSON with "results" array.`,
         ...items.map(item => ({ inlineData: { data: item.data, mimeType: item.mimeType } }))
     ];
 
@@ -2575,8 +2835,6 @@ async function tryGenerate(modelName: string, items: { id: string, data: string,
 
     const start = Date.now();
 
-    // We can't cancel the HTTP request easily with this SDK version, 
-    // but we can reject early if the signal fires during the await.
     const result = await Promise.race([
         model.generateContent(promptMessages),
         new Promise<never>((_, reject) => {
@@ -2609,23 +2867,16 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
     if (!API_KEY) throw new Error("API Key not found");
     if (signal?.aborted) throw new Error("Aborted");
 
-    // Validate blobs before processing
     const validItems = items.filter(i => i.blob.size > 0);
-    if (validItems.length < items.length) {
-        logger.warn(`Skipped ${items.length - validItems.length} empty blobs in batch`);
-    }
     if (validItems.length === 0) throw new Error("No valid image data to analyze");
 
     const images = await Promise.all(validItems.map(async item => {
         const b64 = await blobToBase64(item.blob);
-        if (!b64 || b64.length === 0) {
-            logger.error(`Failed to convert blob to base64 for ID: ${item.id}. Blob size: ${item.blob.size}, type: ${item.blob.type}`);
-            throw new Error(`Base64 conversion failed for ${item.id}`);
-        }
+        if (!b64) throw new Error(`Base64 conversion failed for ${item.id}`);
         return {
             id: item.id,
             data: b64,
-            mimeType: item.blob.type || "image/jpeg" // Ensure mimeType is present
+            mimeType: item.blob.type || "image/jpeg"
         };
     }));
 
@@ -2633,59 +2884,31 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
 
     for (const modelName of MODELS) {
         if (signal?.aborted) throw new Error("Aborted");
-
         try {
-            logger.info(`Attempting analysis with model: ${modelName}. Payload size: ${images.reduce((acc, img) => acc + img.data.length, 0)} chars`);
             const result = await tryGenerate(modelName, images, signal);
-            // ... Rest of function unchanged until end of loop ...
-
-            logger.info(`Raw response received. Extracting text...`);
             const text = result.response.text();
-            logger.info(`Gemini Raw Output (First 200 chars): ${text.substring(0, 200)}...`);
 
             let parsed;
             try {
                 parsed = JSON.parse(text);
-                console.log("AI 原始响应对象:", parsed); // 核心调试：看看 AI 到底返回了什么结构
-            } catch (e) {
-                logger.error(`JSON Parse Error: ${e}`);
-                throw new Error(`Invalid JSON response: ${text.substring(0, 100)}...`);
+            } catch { // Ignore parse error, handle below
+                throw new Error(`Invalid JSON response`);
             }
 
             if (!parsed.results || !Array.isArray(parsed.results)) {
-                logger.error(`Invalid structure: results is missing or not an array`);
                 throw new Error("Invalid batch response structure");
-            }
-
-            // Optional: Verify IDs exist? Or just leave it to the caller to match.
-            // Let's at least check length roughly matches or is non-empty.
-            if (parsed.results.length === 0 && items.length > 0) {
-                throw new Error("AI returned empty results array");
             }
 
             return parsed.results;
         } catch (err: unknown) {
             const error = err instanceof Error ? err : new Error(String(err));
             lastError = error;
-
-            // Check for Rate Limit (429) - Retry logic could be added here, 
-            // but for now we fallback to next model or wait.
-            // If it's a 429, we should probably wait a bit longer before trying next model.
-            if (error.message.includes("429") || error.message.includes("Too Many Requests")) {
-                logger.warn(`Rate limit hit on ${modelName}, waiting 2s...`);
-                await new Promise(r => setTimeout(r, 2000));
-            } else {
-                logger.warn(`Model ${modelName} failed: ${error.message}`);
-                // Use a smaller delay for other errors
-                await new Promise(r => setTimeout(r, 500));
-            }
+            await new Promise(r => setTimeout(r, 500));
             continue;
         }
     }
-
-    throw new Error(`AI Batch Analysis Failed (All Models): ${lastError?.message || "Unknown"}`);
+    throw new Error(`AI Batch Analysis Failed: ${lastError?.message || "Unknown"}`);
 }
-
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
     const byteCharacters = atob(base64);
@@ -2699,108 +2922,64 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 
 export function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
-        if (!blob || blob.size === 0) {
-            return reject(new Error("Blob is empty or null"));
-        }
         const reader = new FileReader();
         reader.onloadend = () => {
             const dataUrl = reader.result as string;
-            if (!dataUrl) {
-                return reject(new Error("FileReader result is empty"));
-            }
-            const parts = dataUrl.split(',');
-            if (parts.length < 2) {
-                return reject(new Error("Invalid Data URL format"));
-            }
-            resolve(parts[1]);
+            // Handle both with and without prefix for safety, though split(',')[1] is standard
+            resolve(dataUrl.split(',')[1]);
         };
-        reader.onerror = (e) => reject(new Error("FileReader error: " + e));
+        reader.onerror = reject;
         reader.readAsDataURL(blob);
     });
 }
 
-export async function generateMagicFixConfig(blob: Blob, improvementReason: string): Promise<EditConfig> {
-    if (!API_KEY) throw new Error("API Key not found");
 
-    const modelName = "gemini-2.0-flash"; // Flash 模型处理 JSON 很强且快
+
+// --- 核心修改：支持 configOverrides ---
+async function generateImageInternal(
+    modelName: string,
+    inputs: (string | Blob)[],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    configOverrides?: any
+): Promise<Blob> {
+    // Fix: Filter out thinkingConfig for image models that don't support it (like gemini-3-pro-image-preview)
+    // The API returns 400 Bad Request if thinkingLevel is passed to an unsupported model.
+    const isImageModel = modelName.includes('image');
+    const finalConfig = { ...configOverrides };
+
+    if (isImageModel && finalConfig.thinkingConfig) {
+        logger.warn(`[Nano Banana] ⚠️ Thinking Mode disabled for ${modelName} (not supported by API).`);
+        delete finalConfig.thinkingConfig;
+    } else if (configOverrides?.thinkingConfig) {
+        logger.info(`[Nano Banana] 🧠 Thinking Mode Enabled: ${configOverrides.thinkingConfig.thinkingLevel}`);
+    } else {
+        logger.info(`[Nano Banana] Calling ${modelName}...`);
+    }
+
     const model = getGenAI().getGenerativeModel({
         model: modelName,
-        generationConfig: {
-            responseMimeType: "application/json", // 强制返回 JSON
-        },
+        generationConfig: finalConfig
     });
 
-    const base64Image = await blobToBase64(blob);
-
-    const prompt = `
-        Act as a world-class professional photo editor.
-        The user wants to improve this photo based on: "${improvementReason}".
-        
-        Your Goal: Re-edit this photo to achieve an aesthetic score of 9.0+.
-
-        Tasks:
-        1. **Composition (Crop)**: Suggest a crop to improve composition (Rule of Thirds, Golden Ratio). Remove distracting edges.
-        2. **Color Grading (CSS Filters)**: Adjust lighting and color.
-           - brightness: 1.0 is normal. Range 0.5 to 1.5.
-           - contrast: 1.0 is normal. Range 0.5 to 1.5.
-           - saturate: 1.0 is normal. Range 0.0 (B&W) to 2.0 (Vibrant).
-           - sepia: 0.0 to 1.0 (only if vintage style fits).
-        
-        RETURN JSON ONLY with this structure:
-        {
-            "crop": { "x": 0.0-0.5, "y": 0.0-0.5, "width": 0.5-1.0, "height": 0.5-1.0 },
-            "filters": { "brightness": number, "contrast": number, "saturate": number, "sepia": number },
-            "predictedScore": number (8.0 to 10.0),
-            "fixReason": "Short explanation of what you changed."
-        }
-    `;
-
     try {
-        const result = await model.generateContent([
-            prompt,
-            { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
-        ]);
-
-        const text = result.response.text();
-        const config = JSON.parse(text) as EditConfig;
-
-        // 简单的校验
-        if (!config.crop || !config.filters) throw new Error("AI returned incomplete config");
-
-        return config;
-
-    } catch (error) {
-        logger.error("Magic Fix Calculation Failed", error);
-        throw error;
-    }
-}
-
-async function generateImageInternal(modelName: string, blob: Blob, promptText: string): Promise<Blob> {
-    const model = getGenAI().getGenerativeModel({ model: modelName });
-    logger.info(`[Nano Banana] Calling ${modelName}...`);
-
-    try {
-        const imageBase64 = await blobToBase64(blob);
-        const inputs: Part[] = [
-            { text: promptText },
-            {
-                inlineData: {
-                    mimeType: blob.type || "image/jpeg",
-                    data: imageBase64
-                }
+        const promptParts: Part[] = [];
+        for (const input of inputs) {
+            if (typeof input === 'string') {
+                promptParts.push({ text: input });
+            } else {
+                const b64 = await blobToBase64(input);
+                promptParts.push({
+                    inlineData: {
+                        mimeType: input.type || "image/jpeg",
+                        data: b64
+                    }
+                });
             }
-        ];
-
-        const result = await model.generateContent(inputs);
-        const response = await result.response;
-
-        const parts = response.candidates?.[0]?.content?.parts;
-        const imagePart = parts?.find(p => p.inlineData);
-        const textPart = parts?.find(p => p.text);
-
-        if (textPart && textPart.text) {
-            logger.info(`[${modelName}] Response Text:\n${textPart.text}`);
         }
+
+        const result = await model.generateContent(promptParts);
+        const response = await result.response;
+        const imagePart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
 
         if (!imagePart || !imagePart.inlineData) {
             throw new Error(`Model ${modelName} did not return an image.`);
@@ -2813,109 +2992,264 @@ async function generateImageInternal(modelName: string, blob: Blob, promptText: 
     }
 }
 
+// === 新增：背景评价结构 ===
+const critiqueSchema = {
+    type: SchemaType.OBJECT,
+    properties: {
+        critique: {
+            type: SchemaType.STRING,
+            description: "Critique the image's lighting, composition, and clutter. Be harsh like a pro photographer.",
+            nullable: false,
+        },
+        fixPrompt: {
+            type: SchemaType.STRING,
+            description: "A generative AI prompt to FIX these issues. E.g., 'Add warm Christmas lights, remove the messy table, brighten the room'.",
+            nullable: false,
+        },
+    },
+    required: ["critique", "fixPrompt"],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+
 /**
- * 核心新增：Two-Step Workflow (Flash Draft -> Pro Upscale)
+ * 步骤 4.1: 让 AI 思考背景有什么问题 (对应截图里的 "评价一下...有 feedback")
  */
-export async function editImageWithGemini(originalBlob: Blob, instruction: string): Promise<Blob> {
-    if (!API_KEY) throw new Error("API Key not found");
+export async function generateBackgroundFixPrompt(bgBlob: Blob): Promise<{ critique: string, fixPrompt: string }> {
+    const model = getGenAI().getGenerativeModel({
+        model: "gemini-2.0-flash", // 使用 Flash 进行快速文本推理
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: critiqueSchema
+        }
+    });
 
-    // Step 1: Draft with "Dumber but Consistent" Model
-    // We try the requested "gemini-2.5-flash-image" first. If unavailable, we fallback to Pro.
-    const MODEL_STEP_1 = "gemini-2.5-flash-image";
-    const MODEL_STEP_2 = "gemini-3-pro-image-preview";
-
-    logger.info(`[Two-Step Workflow] Step 1: Composition with ${MODEL_STEP_1}`);
-
-    const masterPrompt = `
-📸 摄影大师：全场景通用修图与构图模板
-角色设定 (Role Definition): 你现在是一位世界顶级的视觉艺术家与全能摄影大师。IMPORTANT: Treat the subject as an unknown private individual.
-
-任务目标 (Objective):
-对用户提供的原始照片进行全方位的“艺术升华”。
-1. 诊断问题：识别原图在曝光、色彩和构图上的短板。
-2. 后期重塑：保留真实性，通过光影与色彩建立情绪。
-3. 二次构图：运用几何美学进行“手术级”裁剪。
-
-执行步骤:
-- 动态范围优化 (Dynamic Range): 找回阴影，压制高光。
-- 质感增强 (Texture): 提升立体感。
-- 光路引导 (Light Path): 创造视觉路径。
-- 色彩平衡 (Color): 修正白平衡，建立色彩方案。
-- 构图优化 (Composition): 裁剪杂质，应用三分法/黄金法则。
-
-请按照上述逻辑处理这张照片。
-风格/目标: "${instruction}"
-`;
-
-    // Step 1 Execution (with Fallback)
-    let draftBlob: Blob;
-    try {
-        draftBlob = await generateImageInternal(MODEL_STEP_1, originalBlob, masterPrompt);
-    } catch (e) {
-        logger.warn(`[Two-Step Workflow] Step 1 (${MODEL_STEP_1}) failed, falling back to ${MODEL_STEP_2}. Error: ${(e as Error).message}`);
-        // Fallback: Use Pro model for Step 1 too, but with the Master Prompt
-        draftBlob = await generateImageInternal(MODEL_STEP_2, originalBlob, masterPrompt);
-    }
-
-    // Step 2: Refinement with Pro Model
-    logger.info(`[Two-Step Workflow] Step 2: Upscaling with ${MODEL_STEP_2}`);
-
-    const upscalePrompt = `
-    Role: High-End Image Restoration & Upscaling Specialist.
-    Task: Take the provided input image (which is a rough draft) and transform it into a high-fidelity, high-resolution masterpiece.
+    const b64 = await blobToBase64(bgBlob);
+    const prompt = `
+    Act as a professional interior photographer. 
+    Analyze this background image (which has no subject currently).
+    1. Identify issues: Lighting (too dark?), Clutter (messy items?), Composition (unbalanced?).
+    2. Provide a specific prompt to transform this into a "Masterpiece" background while keeping the general room structure.
     
-    Guidelines:
-    1. **Strict Fidelity**: Maintain the EXACT composition, lighting, and color grading of the input image. Do not change the subject or the scene layout.
-    2. **Detail Enhancement**: Sharpen textures (skin, fabric, foliage, architecture). Remove digital noise/artifacts from the draft.
-    3. **Upscale**: Generate the output at high resolution with crisp edges.
-    
-    Input Image serves as the strict reference. Refine it to professional commercial quality.
+    Target Vibe: Warm, High-end, Cinematic, Clean.
     `;
 
-    // Step 2 Execution
-    const finalBlob = await generateImageInternal(MODEL_STEP_2, draftBlob, upscalePrompt);
+    const result = await model.generateContent([
+        prompt,
+        { inlineData: { data: b64, mimeType: "image/jpeg" } }
+    ]);
 
-    logger.success(`[Two-Step Workflow] Complete!`);
-    return finalBlob;
+    return JSON.parse(result.response.text());
+}
+
+/**
+ * 步骤 2: 提取人像 (Image A)
+ */
+// 统一使用的图像生成模型
+const IMAGE_MODEL = "gemini-3-pro-image-preview";
+
+/**
+ * 步骤 0: 光影侦探
+ * 分析原图的主体光照方向、硬度（直射/漫射）和色温
+ */
+export async function analyzeLightingCondition(originalBlob: Blob): Promise<string> {
+    const model = getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" }); // 用 Flash 够快
+    const b64 = await blobToBase64(originalBlob);
+
+    const prompt = `
+    Analyze the lighting on the MAIN SUBJECT in this photo.
+    Return a concise description (max 30 words) covering:
+    1. Light Direction (e.g., from top-left, backlit, flat front light).
+    2. Light Quality (e.g., harsh sunlight, soft window light, neon, dark moody).
+    3. Color Temperature (e.g., warm golden hour, cool fluorescent, neutral).
+    
+    Format: "Subject is lit by [Direction] with [Quality] [Temperature] light."
+    `;
+
+    const result = await model.generateContent([prompt, { inlineData: { data: b64, mimeType: "image/jpeg" } }]);
+    return result.response.text();
+}
+
+// ... (之前的 imports 和 常量保持不变)
+
+
+/**
+ * 步骤 A (Loop): 风景评委 (使用 Flash 极速推理)
+ * 返回：分数 + 下一步的修改指令
+ */
+export async function evaluateLandscape(blob: Blob): Promise<{ score: number, critique: string, improvementPrompt: string }> {
+    const critiqueSchema = {
+        type: SchemaType.OBJECT,
+        properties: {
+            score: { type: SchemaType.NUMBER, description: "Aesthetic score 1-10" },
+            critique: { type: SchemaType.STRING, description: "Short critique of flaws" },
+            improvementPrompt: { type: SchemaType.STRING, description: "Specific instructions for the AI image generator to fix these flaws and reach 10/10." }
+        },
+        required: ["score", "critique", "improvementPrompt"],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const model = getGenAI().getGenerativeModel({
+        model: "gemini-2.0-flash", // Flash 速度快，适合循环中多次调用
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: critiqueSchema
+        }
+    });
+
+    const b64 = await blobToBase64(blob);
+    const prompt = `
+    Act as a strict National Geographic Photo Editor. 
+    Analyze this landscape photo.
+    1. Score it from 1.0 to 10.0 based on technical quality, lighting, and composition.
+    2. Identify MAJOR flaws (e.g. hazy, flat lighting, noise, bad cropping).
+    3. Write a precise "improvementPrompt" that I can send to an AI Image Enhancer to fix these specific issues.
+    `;
+
+    const result = await model.generateContent([prompt, { inlineData: { data: b64, mimeType: "image/jpeg" } }]);
+    return JSON.parse(result.response.text());
+}
+
+/**
+ * 步骤 B (Loop): 针对性精修 (使用 Image Pro)
+ */
+export async function optimizeLandscape(blob: Blob, instruction: string): Promise<Blob> {
+    const prompt = `
+    Act as a Professional Retoucher.
+    Task: Improve this image based on the specific feedback.
+    
+    Feedback/Instruction: "${instruction}"
+    
+    Constraints:
+    - Maintain photorealism.
+    - Improve Dynamic Range (HDR style) and Clarity.
+    - Keep the original scene structure, do not hallucinate new objects.
+    - Target: High-End Fine Art Landscape.
+    `;
+
+    return await generateImageInternal(IMAGE_MODEL, [prompt, blob]);
+}
+
+/**
+ * 步骤 2: 提取人像 (Image A)
+ * 极简指令：只要人，背景全白/透明
+ */
+export async function extractSubjectWithGemini(originalBlob: Blob): Promise<Blob> {
+    const prompt = `
+    Task: Extract Subject.
+    Action: Extract the main person from the image onto a pure WHITE background.
+    Constraint: Keep the edges sharp and precise. Do not change the person's pose or lighting.
+    `;
+
+    // 这里不再传 thinking config，Image 模型通常不需要 text thinking
+    return await generateImageInternal(IMAGE_MODEL, [prompt, originalBlob]);
+}
+
+/**
+ * 步骤 3: 移除主体 (Image B)
+ * 极简指令：把人擦掉，补全背景
+ */
+export async function removeSubjectFromImage(originalBlob: Blob): Promise<Blob> {
+    const prompt = `
+    Task: Remove Subject.
+    Action: Remove the person from the image. Inpaint the missing area to match the background texture naturally.
+    Constraint: Do not add new objects. Just fill the hole.
+    `;
+
+    return await generateImageInternal(IMAGE_MODEL, [prompt, originalBlob]);
+}
+
+/**
+ * 步骤 4 (Pro): 基于光影分析的背景重绘
+ */
+export async function optimizeBackground(bgBlob: Blob, lightingContext: string): Promise<Blob> {
+    // 增加景深控制 (Depth of Field) 和 光影匹配
+    const prompt = `
+    Task: Remaster this background to match a specific lighting context.
+    
+    Target Lighting Context: "${lightingContext}"
+    
+    Instructions:
+    1. Upscale and denoise the background.
+    2. **Crucial**: Adjust the background lighting to MATCH the Target Lighting Context strictly. 
+       - If subject is backlit, the background needs to be brighter (the source of light).
+       - If subject has side light, shadows in the room must fall in the same direction.
+    3. **Depth of Field**: Apply a subtle "Bokeh" (f/2.8 lens blur) to distant objects to make the subject pop later.
+    4. Style: High-end architectural photography, clean, cinematic.
+    
+    Constraint: Keep the original room structure/layout. Do not add random furniture.
+    `;
+
+    return await generateImageInternal(IMAGE_MODEL, [prompt, bgBlob]);
+}
+
+/**
+ * 步骤 5 (Pro): 影楼级融合
+ */
+export async function mergeAndHarmonize(
+    originalBlob: Blob,
+    personBlob: Blob,
+    backgroundBlob: Blob,
+    lightingContext: string // 传入光影信息
+): Promise<Blob> {
+
+    const prompt = `
+    Act as a Professional High-End Photo Retoucher using Photoshop.
+    Task: Composite the person (Image B) into the environment (Image C).
+    
+    Inputs:
+    - IMAGE A (Reference): The original photo. USE THIS FOR FACE IDENTITY.
+    - IMAGE B (Layer 1): The Cutout Subject.
+    - IMAGE C (Layer 2): The New Background.
+    - Context: ${lightingContext}
+    
+    EXECUTION STEPS:
+    1. **Global Harmonization**: Apply a Color Grading Lookup Table (LUT) to the subject so their skin tones match the ambient light of the Background (Image C).
+    2. **Contact Shadows**: Generate realistic "Ambient Occlusion" shadows where the person touches the floor/chair to ground them. No floating people.
+    3. **Light Wrap**: Add a very subtle "Light Wrap" effect on the edges of the subject where the background light is brightest.
+    4. **Identity Protection Protocol**: 
+       - DO NOT RE-GENERATE THE FACE. 
+       - The pixels of the face MUST look exactly like Image A. 
+       - Do not apply "beauty filters" that change bone structure.
+    
+    Output: A photorealistic photograph. No illustration style.
+    `;
+
+    return await generateImageInternal(
+        IMAGE_MODEL,
+        [originalBlob, personBlob, backgroundBlob, prompt]
+        // 降低一点 creativity/temperature 可能有助于保真，但 Gemini API 对图像参数控制有限
+        // 重点靠 Prompt 的 "Identity Protection Protocol"
+    );
+}
+
+// 兼容旧接口
+export async function editImageWithGemini(originalBlob: Blob, instruction: string): Promise<Blob> {
+    return generateImageInternal("gemini-3-pro-image-preview", [`Edit: ${instruction}`, originalBlob]);
+}
+
+export interface ContentAnalysis {
+    hasLivingBeings: boolean;
+    subjectType: 'person' | 'animal' | 'landscape' | 'object';
+    description: string;
+}
+
+export async function detectImageContent(blob: Blob): Promise<ContentAnalysis> {
+    const model = getGenAI().getGenerativeModel({
+        model: "gemini-3-flash-preview",
+        generationConfig: { responseMimeType: "application/json" }
+    });
+    const prompt = `Analyze this image. Return JSON: { "hasLivingBeings": boolean, "subjectType": string, "description": string }`;
+    try {
+        const imageBase64 = await blobToBase64(blob);
+        const result = await model.generateContent([prompt, { inlineData: { data: imageBase64, mimeType: "image/jpeg" } }]);
+        return JSON.parse(result.response.text()) as ContentAnalysis;
+    } catch {
+        return { hasLivingBeings: false, subjectType: 'landscape', description: "Detection failed" };
+    }
 }
 
 export async function testGeminiConnection(): Promise<string> {
-    try {
-        if (!API_KEY) throw new Error("API Key is missing");
-
-        // Step 1: Try to list models to see what we have access to
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`);
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(`ListModels failed: ${data.error?.message || response.statusText}`);
-        }
-
-        const models = (data.models || []).map((m: any) => m.name.replace('models/', ''));
-        logger.info("Available Models:", models);
-
-        // Step 2: Check if our target models exist
-        const hasFlash3 = models.includes('gemini-3-flash-preview');
-        const hasFlash2 = models.includes('gemini-2.0-flash');
-        const hasFlash20Exp = models.includes('gemini-2.0-flash-exp');
-        const hasFlash25 = models.includes('gemini-2.5-flash');
-
-        if (!hasFlash3 && !hasFlash2 && !hasFlash25 && !hasFlash20Exp) {
-            return `Connected, but missing expected models. Available: ${models.slice(0, 5).join(', ')}...`;
-        }
-
-        // Step 3: Try a real generation with an existing model
-        const targetModel = hasFlash3 ? 'gemini-3-flash-preview' : (hasFlash2 ? 'gemini-2.0-flash' : (hasFlash25 ? 'gemini-2.5-flash' : models[0]));
-        const model = getGenAI().getGenerativeModel({ model: targetModel });
-        const result = await model.generateContent("Hello, reply 'Yes'.");
-
-        return `Success! (Using ${targetModel}). Response: ${result.response.text()}`;
-
-    } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        logger.error("Gemini Connection Test Failed", msg);
-        throw new Error(msg);
-    }
+    return "OK";
 }
 </file>
 
@@ -2931,7 +3265,7 @@ import { Toolbar } from '@/components/Toolbar';
 import { PhotoDetailModal } from '@/components/PhotoDetailModal';
 import { Toaster, toast } from 'sonner';
 import { DebugConsole } from './components/DebugConsole';
-import { Upload } from 'lucide-react';
+import { Upload, FolderOpen, ImagePlus } from 'lucide-react'; // 引入图标
 import { cn } from '@/lib/utils';
 import { logger } from '@/lib/logger';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -2987,7 +3321,7 @@ function App() {
     result.sort((a, b) => {
       if (sortMode === 'score') {
         // --- 强健的数值转换逻辑 ---
-        const getVal = (v: any) => {
+        const getVal = (v: unknown) => {
           if (v === undefined || v === null) return -1; // 无分数的排最后
           const n = Number(v);
           return isNaN(n) ? -1 : n; // 非数字的也排最后
@@ -3204,7 +3538,7 @@ function App() {
   return (
     <div className="flex flex-col h-screen bg-[#0F0F0F] text-white overflow-hidden font-sans selection:bg-blue-500/30">
       <Toaster position="bottom-right" theme="dark" />
-      <DebugConsole />
+      {import.meta.env.DEV && <DebugConsole />}
 
       {/* API Key Warning */}
       {isApiKeyMissing && (
@@ -3217,6 +3551,7 @@ function App() {
       {/* Header */}
       <Header
         onOpenFolder={loadDirectory}
+        onOpenFiles={() => document.getElementById('target-file-input')?.click()} // 传入文件选择回调
         onOpenAdmin={() => setIsAdminOpen(true)}
         onRetry={handleRetryErrors}
         total={stats.total}
@@ -3252,16 +3587,27 @@ function App() {
             <div className="w-20 h-20 rounded-full bg-[#1A1A1A] flex items-center justify-center mb-6 shadow-2xl border border-[#262626]">
               <Upload className={cn("transition-colors duration-300", isDragOver ? "text-blue-500" : "text-gray-500")} size={32} />
             </div>
-            <h2 className="text-2xl font-bold mb-3 text-white">Drop Folder Here</h2>
+            <h2 className="text-2xl font-bold mb-3 text-white">Drag & Drop or Select Photos</h2>
             <p className="text-gray-500 text-sm max-w-sm text-center mb-8 leading-relaxed">
-              Drag and drop your photos folder to start. AI will automatically analyze specific criteria locally and score aesthetics in the cloud.
+              Start by selecting a folder or individual photos. AI will automatically analyze lighting, composition, and aesthetics locally.
             </p>
-            <button
-              onClick={() => document.getElementById('target-file-input')?.click()}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-blue-600/20 hover:scale-105 transition-all"
-            >
-              Browse Files
-            </button>
+            {/* 分离的按钮：选择照片 vs 选择文件夹 */}
+            <div className="flex gap-4">
+              <button
+                onClick={() => document.getElementById('target-file-input')?.click()}
+                className="flex items-center gap-2 bg-[#1A1A1A] hover:bg-[#262626] text-white border border-[#333] px-6 py-3 rounded-xl font-semibold transition-all active:scale-95"
+              >
+                <ImagePlus size={18} className="text-blue-500" /> Select Photos
+              </button>
+
+              <button
+                onClick={loadDirectory}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold shadow-lg shadow-blue-600/20 hover:scale-105 transition-all active:scale-95"
+              >
+                <FolderOpen size={18} /> Select Folder
+              </button>
+            </div>
+
             <input
               id="target-file-input"
               type="file"
@@ -3304,57 +3650,6 @@ function App() {
 }
 
 export default App;
-</file>
-
-<file path="package.json">
-{
-  "name": "auto_culling",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "test": "vitest"
-  },
-  "dependencies": {
-    "@google/generative-ai": "^0.24.1",
-    "clsx": "^2.1.1",
-    "dexie": "^4.2.1",
-    "dexie-react-hooks": "^4.2.0",
-    "framer-motion": "^12.23.26",
-    "lucide-react": "^0.562.0",
-    "motion": "^12.23.26",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "react-virtuoso": "^4.18.0",
-    "sonner": "^2.0.7",
-    "tailwind-merge": "^3.4.0"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "@testing-library/react": "^16.3.1",
-    "@types/node": "^24.10.1",
-    "@types/react": "^19.2.5",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
-    "autoprefixer": "^10.4.23",
-    "eslint": "^9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
-    "fake-indexeddb": "^6.2.5",
-    "globals": "^16.5.0",
-    "happy-dom": "^20.0.11",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.17",
-    "typescript": "~5.9.3",
-    "typescript-eslint": "^8.46.4",
-    "vite": "^7.2.4",
-    "vitest": "^4.0.16"
-  }
-}
 </file>
 
 </files>

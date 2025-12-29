@@ -9,7 +9,7 @@ import { Toolbar } from '@/components/Toolbar';
 import { PhotoDetailModal } from '@/components/PhotoDetailModal';
 import { Toaster, toast } from 'sonner';
 import { DebugConsole } from './components/DebugConsole';
-import { Upload } from 'lucide-react';
+import { Upload, FolderOpen, ImagePlus } from 'lucide-react'; // 引入图标
 import { cn } from '@/lib/utils';
 import { logger } from '@/lib/logger';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -65,7 +65,7 @@ function App() {
     result.sort((a, b) => {
       if (sortMode === 'score') {
         // --- 强健的数值转换逻辑 ---
-        const getVal = (v: any) => {
+        const getVal = (v: unknown) => {
           if (v === undefined || v === null) return -1; // 无分数的排最后
           const n = Number(v);
           return isNaN(n) ? -1 : n; // 非数字的也排最后
@@ -282,7 +282,7 @@ function App() {
   return (
     <div className="flex flex-col h-screen bg-[#0F0F0F] text-white overflow-hidden font-sans selection:bg-blue-500/30">
       <Toaster position="bottom-right" theme="dark" />
-      <DebugConsole />
+      {import.meta.env.DEV && <DebugConsole />}
 
       {/* API Key Warning */}
       {isApiKeyMissing && (
@@ -295,6 +295,7 @@ function App() {
       {/* Header */}
       <Header
         onOpenFolder={loadDirectory}
+        onOpenFiles={() => document.getElementById('target-file-input')?.click()} // 传入文件选择回调
         onOpenAdmin={() => setIsAdminOpen(true)}
         onRetry={handleRetryErrors}
         total={stats.total}
@@ -330,16 +331,27 @@ function App() {
             <div className="w-20 h-20 rounded-full bg-[#1A1A1A] flex items-center justify-center mb-6 shadow-2xl border border-[#262626]">
               <Upload className={cn("transition-colors duration-300", isDragOver ? "text-blue-500" : "text-gray-500")} size={32} />
             </div>
-            <h2 className="text-2xl font-bold mb-3 text-white">Drop Folder Here</h2>
+            <h2 className="text-2xl font-bold mb-3 text-white">Drag & Drop or Select Photos</h2>
             <p className="text-gray-500 text-sm max-w-sm text-center mb-8 leading-relaxed">
-              Drag and drop your photos folder to start. AI will automatically analyze specific criteria locally and score aesthetics in the cloud.
+              Start by selecting a folder or individual photos. AI will automatically analyze lighting, composition, and aesthetics locally.
             </p>
-            <button
-              onClick={() => document.getElementById('target-file-input')?.click()}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-blue-600/20 hover:scale-105 transition-all"
-            >
-              Browse Files
-            </button>
+            {/* 分离的按钮：选择照片 vs 选择文件夹 */}
+            <div className="flex gap-4">
+              <button
+                onClick={() => document.getElementById('target-file-input')?.click()}
+                className="flex items-center gap-2 bg-[#1A1A1A] hover:bg-[#262626] text-white border border-[#333] px-6 py-3 rounded-xl font-semibold transition-all active:scale-95"
+              >
+                <ImagePlus size={18} className="text-blue-500" /> Select Photos
+              </button>
+
+              <button
+                onClick={loadDirectory}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold shadow-lg shadow-blue-600/20 hover:scale-105 transition-all active:scale-95"
+              >
+                <FolderOpen size={18} /> Select Folder
+              </button>
+            </div>
+
             <input
               id="target-file-input"
               type="file"
