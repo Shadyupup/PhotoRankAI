@@ -150,7 +150,7 @@ function App() {
       }));
 
       db.transaction('rw', db.photos, async () => {
-        await db.photos.clear(); // Clear old for new import? Or append? Usually clear for this type of app.
+        // await db.photos.clear(); // Removed to preserve existing photos
         await db.photos.bulkPut(newPhotos);
       });
     }
@@ -352,16 +352,7 @@ function App() {
               </button>
             </div>
 
-            <input
-              id="target-file-input"
-              type="file"
-              multiple
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files) loadFiles(Array.from(e.target.files));
-              }}
-            />
+
           </div>
         ) : (
           // Grid
@@ -389,6 +380,22 @@ function App() {
           onRetry={handleRetryErrors}
         />
       )}
+
+      {/* Hidden File Input for "Add Photos" (Must be always present) */}
+      <input
+        id="target-file-input"
+        type="file"
+        multiple
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) {
+            loadFiles(Array.from(e.target.files));
+            // Reset value to allow selecting same files again if needed
+            e.target.value = '';
+          }
+        }}
+      />
     </div>
   );
 }

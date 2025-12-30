@@ -5,7 +5,7 @@ const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 let genAI: GoogleGenerativeAI | null = null;
 
-function getGenAI() {
+export function getGenAI() {
     if (!genAI) {
         if (!API_KEY) throw new Error("VITE_GEMINI_API_KEY is not defined in your environment variables (.env file).");
         genAI = new GoogleGenerativeAI(API_KEY);
@@ -52,7 +52,6 @@ const batchSchema = {
 const MODELS = [
     "gemini-3-flash-preview",
     "gemini-2.0-flash",
-    "gemini-1.5-pro",
 ];
 
 async function tryGenerate(modelName: string, items: { id: string, data: string, mimeType: string }[], signal?: AbortSignal) {
@@ -155,16 +154,6 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
     throw new Error(`AI Batch Analysis Failed: ${lastError?.message || "Unknown"}`);
 }
 
-function base64ToBlob(base64: string, mimeType: string): Blob {
-    const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: mimeType });
-}
-
 export function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -178,15 +167,29 @@ export function blobToBase64(blob: Blob): Promise<string> {
     });
 }
 
+// ...
 
+export function base64ToBlob(base64: string, mimeType: string): Blob {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+}
+
+// ...
 
 // --- 核心修改：支持 configOverrides ---
-async function generateImageInternal(
+// Exported for Workflow files
+export async function generateImageInternal(
     modelName: string,
     inputs: (string | Blob)[],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     configOverrides?: any
 ): Promise<Blob> {
+    // ... impl
     // Fix: Filter out thinkingConfig for image models that don't support it (like gemini-3-pro-image-preview)
     // The API returns 400 Bad Request if thinkingLevel is passed to an unsupported model.
     const isImageModel = modelName.includes('image');
@@ -237,67 +240,17 @@ async function generateImageInternal(
     }
 }
 
-// === 新增：背景评价结构 ===
-const critiqueSchema = {
-    type: SchemaType.OBJECT,
-    properties: {
-        critique: {
-            type: SchemaType.STRING,
-            description: "Critique the image's lighting, composition, and clutter. Be harsh like a pro photographer.",
-            nullable: false,
-        },
-        fixPrompt: {
-            type: SchemaType.STRING,
-            description: "A generative AI prompt to FIX these issues. E.g., 'Add warm Christmas lights, remove the messy table, brighten the room'.",
-            nullable: false,
-        },
-    },
-    required: ["critique", "fixPrompt"],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-} as any;
+// ...
 
-/**
- * 步骤 4.1: 让 AI 思考背景有什么问题 (对应截图里的 "评价一下...有 feedback")
- */
-export async function generateBackgroundFixPrompt(bgBlob: Blob): Promise<{ critique: string, fixPrompt: string }> {
-    const model = getGenAI().getGenerativeModel({
-        model: "gemini-2.0-flash", // 使用 Flash 进行快速文本推理
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: critiqueSchema
-        }
-    });
-
-    const b64 = await blobToBase64(bgBlob);
-    const prompt = `
-    Act as a professional interior photographer. 
-    Analyze this background image (which has no subject currently).
-    1. Identify issues: Lighting (too dark?), Clutter (messy items?), Composition (unbalanced?).
-    2. Provide a specific prompt to transform this into a "Masterpiece" background while keeping the general room structure.
-    
-    Target Vibe: Warm, High-end, Cinematic, Clean.
-    `;
-
-    const result = await model.generateContent([
-        prompt,
-        { inlineData: { data: b64, mimeType: "image/jpeg" } }
-    ]);
-
-    return JSON.parse(result.response.text());
-}
-
-/**
- * 步骤 2: 提取人像 (Image A)
- */
 // 统一使用的图像生成模型
-const IMAGE_MODEL = "gemini-3-pro-image-preview";
+export const IMAGE_MODEL = "gemini-3-pro-image-preview";
 
 /**
  * 步骤 0: 光影侦探
  * 分析原图的主体光照方向、硬度（直射/漫射）和色温
  */
 export async function analyzeLightingCondition(originalBlob: Blob): Promise<string> {
-    const model = getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" }); // 用 Flash 够快
+    const model = getGenAI().getGenerativeModel({ model: "gemini-3-flash-preview" }); // 用 Flash 够快
     const b64 = await blobToBase64(originalBlob);
 
     const prompt = `
@@ -314,65 +267,6 @@ export async function analyzeLightingCondition(originalBlob: Blob): Promise<stri
     return result.response.text();
 }
 
-// ... (之前的 imports 和 常量保持不变)
-
-
-/**
- * 步骤 A (Loop): 风景评委 (使用 Flash 极速推理)
- * 返回：分数 + 下一步的修改指令
- */
-export async function evaluateLandscape(blob: Blob): Promise<{ score: number, critique: string, improvementPrompt: string }> {
-    const critiqueSchema = {
-        type: SchemaType.OBJECT,
-        properties: {
-            score: { type: SchemaType.NUMBER, description: "Aesthetic score 1-10" },
-            critique: { type: SchemaType.STRING, description: "Short critique of flaws" },
-            improvementPrompt: { type: SchemaType.STRING, description: "Specific instructions for the AI image generator to fix these flaws and reach 10/10." }
-        },
-        required: ["score", "critique", "improvementPrompt"],
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
-
-    const model = getGenAI().getGenerativeModel({
-        model: "gemini-2.0-flash", // Flash 速度快，适合循环中多次调用
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: critiqueSchema
-        }
-    });
-
-    const b64 = await blobToBase64(blob);
-    const prompt = `
-    Act as a strict National Geographic Photo Editor. 
-    Analyze this landscape photo.
-    1. Score it from 1.0 to 10.0 based on technical quality, lighting, and composition.
-    2. Identify MAJOR flaws (e.g. hazy, flat lighting, noise, bad cropping).
-    3. Write a precise "improvementPrompt" that I can send to an AI Image Enhancer to fix these specific issues.
-    `;
-
-    const result = await model.generateContent([prompt, { inlineData: { data: b64, mimeType: "image/jpeg" } }]);
-    return JSON.parse(result.response.text());
-}
-
-/**
- * 步骤 B (Loop): 针对性精修 (使用 Image Pro)
- */
-export async function optimizeLandscape(blob: Blob, instruction: string): Promise<Blob> {
-    const prompt = `
-    Act as a Professional Retoucher.
-    Task: Improve this image based on the specific feedback.
-    
-    Feedback/Instruction: "${instruction}"
-    
-    Constraints:
-    - Maintain photorealism.
-    - Improve Dynamic Range (HDR style) and Clarity.
-    - Keep the original scene structure, do not hallucinate new objects.
-    - Target: High-End Fine Art Landscape.
-    `;
-
-    return await generateImageInternal(IMAGE_MODEL, [prompt, blob]);
-}
 
 /**
  * 步骤 2: 提取人像 (Image A)
@@ -496,3 +390,7 @@ export async function detectImageContent(blob: Blob): Promise<ContentAnalysis> {
 export async function testGeminiConnection(): Promise<string> {
     return "OK";
 }
+
+
+
+

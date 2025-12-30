@@ -11,8 +11,8 @@ self.onmessage = async (e: MessageEvent) => {
         // 1. Generate Thumbnail (300px)
         const thumbBlob = await resizeImage(bitmap, 300);
 
-        // 2. Generate Analysis (1024px)
-        const analysisBlob = await resizeImage(bitmap, 1024);
+        // 2. Generate Analysis (512px) - Optimized for Token Usage
+        const analysisBlob = await resizeImage(bitmap, 512);
 
         console.log(`[Worker] Processing ${id}: Compression Complete. Thumb=${thumbBlob?.size}, Analysis=${analysisBlob?.size}`);
 

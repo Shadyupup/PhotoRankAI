@@ -65,7 +65,9 @@ src/
     db.ts
     gemini.ts
     imageProcessing.ts
+    landscape-workflow.ts
     logger.ts
+    portrait-workflow.ts
     segmentation.ts
     utils.ts
   workers/
@@ -96,6 +98,324 @@ vite.config.ts
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="src/lib/landscape-workflow.ts">
+import { SchemaType } from "@google/generative-ai";
+import { getGenAI, blobToBase64, generateImageInternal, IMAGE_MODEL } from "./gemini";
+import { logger } from "./logger";
+import { toast } from "sonner";
+
+// 1. Mod Analysis
+export async function evaluateLandscape(blob: Blob): Promise<{ score: number, critique: string, improvementPrompt: string }> {
+    const critiqueSchema = {
+        type: SchemaType.OBJECT,
+        properties: {
+            score: { type: SchemaType.NUMBER, description: "Aesthetic score 1-10" },
+            critique: { type: SchemaType.STRING, description: "Short critique of flaws" },
+            improvementPrompt: { type: SchemaType.STRING, description: "Specific instructions for the AI image generator to fix these flaws and reach 10/10." }
+        },
+        required: ["score", "critique", "improvementPrompt"],
+    };
+
+    const model = getGenAI().getGenerativeModel({
+        model: "gemini-3-flash-preview",
+        generationConfig: {
+            responseMimeType: "application/json",
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            responseSchema: critiqueSchema as any
+        }
+    });
+
+    const b64 = await blobToBase64(blob);
+    const prompt = `
+    Act as a strict National Geographic Photo Editor. 
+    Analyze this landscape photo.
+    1. Score it from 1.0 to 10.0 based on technical quality, lighting, and composition.
+    2. Identify MAJOR flaws (e.g. hazy, flat lighting, noise, bad cropping).
+    3. Write a precise "improvementPrompt" that I can send to an AI Image Enhancer to fix these specific issues.
+    `;
+
+    const result = await model.generateContent([prompt, { inlineData: { data: b64, mimeType: "image/jpeg" } }]);
+    return JSON.parse(result.response.text());
+}
+
+// 2. Mod Optimization
+export async function optimizeLandscape(blob: Blob, instruction: string): Promise<Blob> {
+    const prompt = `
+    Act as a Professional Retoucher.
+    Task: Improve this image based on the specific feedback.
+    
+    Feedback/Instruction: "${instruction}"
+    
+    Constraints:
+    - Maintain photorealism.
+    - Improve Dynamic Range (HDR style) and Clarity.
+    - Keep the original scene structure, do not hallucinate new objects.
+    - Target: High-End Fine Art Landscape.
+    `;
+
+    return await generateImageInternal(IMAGE_MODEL, [prompt, blob]);
+}
+
+// 3. Workflow Runner
+export async function runLandscapeWorkflow(
+    blob: Blob,
+    toastId: string | number
+): Promise<{ blob: Blob, score: number, reason: string }> {
+    logger.info("🏞️ Landscape Mode (Iterative Loop)");
+
+    let loopBlob = blob;
+    let loopScore = 0;
+    let loopReason = "Initial Capture";
+    let iteration = 0;
+    const MAX_LOOPS = 3;
+    const TARGET_SCORE_LANDSCAPE = 8.0;
+
+    while (iteration < MAX_LOOPS) {
+        iteration++;
+        toast.loading(`Round ${iteration}: AI Critic & Plan...`, { id: toastId });
+
+        // 1. Evaluate
+        const evalResult = await evaluateLandscape(loopBlob);
+        loopScore = evalResult.score;
+        loopReason = evalResult.critique;
+
+        logger.info(`[Loop ${iteration}] Score: ${loopScore}, Fix: ${evalResult.improvementPrompt}`);
+
+        if (loopScore >= TARGET_SCORE_LANDSCAPE) {
+            toast.success(`Target Met! Score: ${loopScore}`, { id: toastId });
+            break;
+        }
+        if (iteration === MAX_LOOPS) {
+            toast("Max loops reached", { id: toastId });
+            break;
+        }
+
+        // 2. Optimize
+        toast.loading(`Round ${iteration}: Fixing: ${evalResult.critique.slice(0, 20)}...`, { id: toastId });
+        try {
+            loopBlob = await optimizeLandscape(loopBlob, evalResult.improvementPrompt);
+        } catch (e) {
+            logger.error("Landscape generation failed", e);
+            break;
+        }
+    }
+
+    const currentReason = `[Loop x${iteration}] ${loopReason}`;
+
+    return { blob: loopBlob, score: loopScore, reason: currentReason };
+}
+</file>
+
+<file path="src/lib/portrait-workflow.ts">
+import { SchemaType } from "@google/generative-ai";
+import { getGenAI, blobToBase64, generateImageInternal, analyzePhotosBatch } from "./gemini";
+import { logger } from "./logger";
+import { toast } from "sonner";
+
+// 1. Mod Analysis
+export async function analyzePortraitForGen(originalBlob: Blob): Promise<{ description: string, suggestions: string }> {
+    const model = getGenAI().getGenerativeModel({
+        model: "gemini-3-flash-preview",
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: SchemaType.OBJECT,
+                properties: {
+                    description: {
+                        type: SchemaType.STRING,
+                        description: "A brief, factual description of the main subject and lighting (e.g. 'Close up of a man in a suit, soft window light'). Max 20 words."
+                    },
+                    suggestions: {
+                        type: SchemaType.STRING,
+                        description: "Specific, short artistic suggestions to improve this specific image to high-end magazine quality. (e.g. 'Brighten eyes, smooth skin slightly, warm up the lighting')."
+                    }
+                },
+                required: ["description", "suggestions"]
+            }
+        }
+    });
+
+    const b64 = await blobToBase64(originalBlob);
+    const instruction = `
+    Analyze this portrait. 
+    Provide a brief visual description and 3 specific suggestions to make it a masterpiece photo.
+    Focus on lighting, skin texture, and clarity.
+    `;
+
+    const result = await model.generateContent([
+        instruction,
+        { inlineData: { data: b64, mimeType: "image/jpeg" } }
+    ]);
+
+    return JSON.parse(result.response.text());
+}
+
+// 2. Mod Generation
+export async function generatePortraitMasterpiece(
+    originalBlob: Blob,
+    analysis: { description: string, suggestions: string }
+): Promise<Blob> {
+    const finalPrompt = `
+    Edit this image to create a high-end fashion magazine quality masterpiece.
+    
+    Instructions:
+    1. Beautify the subject naturally, strictly respecting their ethnicity, bone structure, and facial features. 
+    2. Smooth skin texture slightly but keep it realistic (retain skin pores, no plastic look).
+    3. Improve lighting to be cinematic and flattering.
+    4. Enhance the eyes and hair details for sharpness.
+    5. Maintain the original pose and expression exactly.
+
+    Context: ${analysis.description}.
+    Specific improvements: ${analysis.suggestions}.
+    
+    Output a high-quality photorealistic image.
+    `;
+
+    return await generateImageInternal(
+        "gemini-3-pro-image-preview",
+        [finalPrompt, originalBlob],
+        {
+            // Lower temperature for stability if supported
+        }
+    );
+}
+
+// 3. Workflow Runner
+export async function runPortraitWorkflow(
+    blob: Blob,
+    toastId: string | number
+): Promise<{ blob: Blob, score: number, reason: string }> {
+    logger.info("🚀 Portrait Mode (MasterLens Core)");
+
+    // Step 2: Analysis
+    toast.loading("Step 2: Analyzing Face & Light...", { id: toastId });
+    const analysisResult = await analyzePortraitForGen(blob);
+    logger.info(`Description: ${analysisResult.description}`);
+    logger.info(`Suggestions: ${analysisResult.suggestions}`);
+
+    // Step 3: Generation
+    toast.loading("Step 3: Mastering Portrait...", { id: toastId });
+    let finalResultBlob: Blob;
+    let currentReason = "";
+
+    try {
+        finalResultBlob = await generatePortraitMasterpiece(blob, analysisResult);
+        currentReason = `[MasterLens Edit] ${analysisResult.suggestions}`;
+    } catch (e) {
+        logger.error("Portrait Generation Failed", e);
+        throw new Error("AI Generation Service Busy");
+    }
+
+    // Step 4: Scoring
+    const finalRes = await analyzePhotosBatch([{ id: 'final', blob: finalResultBlob }]); // This calls back to gemini.ts
+    const currentScore = finalRes[0].score;
+
+    return { blob: finalResultBlob, score: currentScore, reason: currentReason };
+}
+</file>
+
+<file path="public/vite.svg">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="31.88" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 257"><defs><linearGradient id="IconifyId1813088fe1fbc01fb466" x1="-.828%" x2="57.636%" y1="7.652%" y2="78.411%"><stop offset="0%" stop-color="#41D1FF"></stop><stop offset="100%" stop-color="#BD34FE"></stop></linearGradient><linearGradient id="IconifyId1813088fe1fbc01fb467" x1="43.376%" x2="50.316%" y1="2.242%" y2="89.03%"><stop offset="0%" stop-color="#FFEA83"></stop><stop offset="8.333%" stop-color="#FFDD35"></stop><stop offset="100%" stop-color="#FFA800"></stop></linearGradient></defs><path fill="url(#IconifyId1813088fe1fbc01fb466)" d="M255.153 37.938L134.897 252.976c-2.483 4.44-8.862 4.466-11.382.048L.875 37.958c-2.746-4.814 1.371-10.646 6.827-9.67l120.385 21.517a6.537 6.537 0 0 0 2.322-.004l117.867-21.483c5.438-.991 9.574 4.796 6.877 9.62Z"></path><path fill="url(#IconifyId1813088fe1fbc01fb467)" d="M185.432.063L96.44 17.501a3.268 3.268 0 0 0-2.634 3.014l-5.474 92.456a3.268 3.268 0 0 0 3.997 3.378l24.777-5.718c2.318-.535 4.413 1.507 3.936 3.838l-7.361 36.047c-.495 2.426 1.782 4.5 4.151 3.78l15.304-4.649c2.372-.72 4.652 1.36 4.15 3.788l-11.698 56.621c-.732 3.542 3.979 5.473 5.943 2.437l1.313-2.028l72.516-144.72c1.215-2.423-.88-5.186-3.54-4.672l-25.505 4.922c-2.396.462-4.435-1.77-3.759-4.114l16.646-57.705c.677-2.35-1.37-4.583-3.769-4.113Z"></path></svg>
+</file>
+
+<file path="src/assets/react.svg">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="35.93" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 228"><path fill="#00D8FF" d="M210.483 73.824a171.49 171.49 0 0 0-8.24-2.597c.465-1.9.893-3.777 1.273-5.621c6.238-30.281 2.16-54.676-11.769-62.708c-13.355-7.7-35.196.329-57.254 19.526a171.23 171.23 0 0 0-6.375 5.848a155.866 155.866 0 0 0-4.241-3.917C100.759 3.829 77.587-4.822 63.673 3.233C50.33 10.957 46.379 33.89 51.995 62.588a170.974 170.974 0 0 0 1.892 8.48c-3.28.932-6.445 1.924-9.474 2.98C17.309 83.498 0 98.307 0 113.668c0 15.865 18.582 31.778 46.812 41.427a145.52 145.52 0 0 0 6.921 2.165a167.467 167.467 0 0 0-2.01 9.138c-5.354 28.2-1.173 50.591 12.134 58.266c13.744 7.926 36.812-.22 59.273-19.855a145.567 145.567 0 0 0 5.342-4.923a168.064 168.064 0 0 0 6.92 6.314c21.758 18.722 43.246 26.282 56.54 18.586c13.731-7.949 18.194-32.003 12.4-61.268a145.016 145.016 0 0 0-1.535-6.842c1.62-.48 3.21-.974 4.76-1.488c29.348-9.723 48.443-25.443 48.443-41.52c0-15.417-17.868-30.326-45.517-39.844Zm-6.365 70.984c-1.4.463-2.836.91-4.3 1.345c-3.24-10.257-7.612-21.163-12.963-32.432c5.106-11 9.31-21.767 12.459-31.957c2.619.758 5.16 1.557 7.61 2.4c23.69 8.156 38.14 20.213 38.14 29.504c0 9.896-15.606 22.743-40.946 31.14Zm-10.514 20.834c2.562 12.94 2.927 24.64 1.23 33.787c-1.524 8.219-4.59 13.698-8.382 15.893c-8.067 4.67-25.32-1.4-43.927-17.412a156.726 156.726 0 0 1-6.437-5.87c7.214-7.889 14.423-17.06 21.459-27.246c12.376-1.098 24.068-2.894 34.671-5.345a134.17 134.17 0 0 1 1.386 6.193ZM87.276 214.515c-7.882 2.783-14.16 2.863-17.955.675c-8.075-4.657-11.432-22.636-6.853-46.752a156.923 156.923 0 0 1 1.869-8.499c10.486 2.32 22.093 3.988 34.498 4.994c7.084 9.967 14.501 19.128 21.976 27.15a134.668 134.668 0 0 1-4.877 4.492c-9.933 8.682-19.886 14.842-28.658 17.94ZM50.35 144.747c-12.483-4.267-22.792-9.812-29.858-15.863c-6.35-5.437-9.555-10.836-9.555-15.216c0-9.322 13.897-21.212 37.076-29.293c2.813-.98 5.757-1.905 8.812-2.773c3.204 10.42 7.406 21.315 12.477 32.332c-5.137 11.18-9.399 22.249-12.634 32.792a134.718 134.718 0 0 1-6.318-1.979Zm12.378-84.26c-4.811-24.587-1.616-43.134 6.425-47.789c8.564-4.958 27.502 2.111 47.463 19.835a144.318 144.318 0 0 1 3.841 3.545c-7.438 7.987-14.787 17.08-21.808 26.988c-12.04 1.116-23.565 2.908-34.161 5.309a160.342 160.342 0 0 1-1.76-7.887Zm110.427 27.268a347.8 347.8 0 0 0-7.785-12.803c8.168 1.033 15.994 2.404 23.343 4.08c-2.206 7.072-4.956 14.465-8.193 22.045a381.151 381.151 0 0 0-7.365-13.322Zm-45.032-43.861c5.044 5.465 10.096 11.566 15.065 18.186a322.04 322.04 0 0 0-30.257-.006c4.974-6.559 10.069-12.652 15.192-18.18ZM82.802 87.83a323.167 323.167 0 0 0-7.227 13.238c-3.184-7.553-5.909-14.98-8.134-22.152c7.304-1.634 15.093-2.97 23.209-3.984a321.524 321.524 0 0 0-7.848 12.897Zm8.081 65.352c-8.385-.936-16.291-2.203-23.593-3.793c2.26-7.3 5.045-14.885 8.298-22.6a321.187 321.187 0 0 0 7.257 13.246c2.594 4.48 5.28 8.868 8.038 13.147Zm37.542 31.03c-5.184-5.592-10.354-11.779-15.403-18.433c4.902.192 9.899.29 14.978.29c5.218 0 10.376-.117 15.453-.343c-4.985 6.774-10.018 12.97-15.028 18.486Zm52.198-57.817c3.422 7.8 6.306 15.345 8.596 22.52c-7.422 1.694-15.436 3.058-23.88 4.071a382.417 382.417 0 0 0 7.859-13.026a347.403 347.403 0 0 0 7.425-13.565Zm-16.898 8.101a358.557 358.557 0 0 1-12.281 19.815a329.4 329.4 0 0 1-23.444.823c-7.967 0-15.716-.248-23.178-.732a310.202 310.202 0 0 1-12.513-19.846h.001a307.41 307.41 0 0 1-10.923-20.627a310.278 310.278 0 0 1 10.89-20.637l-.001.001a307.318 307.318 0 0 1 12.413-19.761c7.613-.576 15.42-.876 23.31-.876H128c7.926 0 15.743.303 23.354.883a329.357 329.357 0 0 1 12.335 19.695a358.489 358.489 0 0 1 11.036 20.54a329.472 329.472 0 0 1-11 20.722Zm22.56-122.124c8.572 4.944 11.906 24.881 6.52 51.026c-.344 1.668-.73 3.367-1.15 5.09c-10.622-2.452-22.155-4.275-34.23-5.408c-7.034-10.017-14.323-19.124-21.64-27.008a160.789 160.789 0 0 1 5.888-5.4c18.9-16.447 36.564-22.941 44.612-18.3ZM128 90.808c12.625 0 22.86 10.235 22.86 22.86s-10.235 22.86-22.86 22.86s-22.86-10.235-22.86-22.86s10.235-22.86 22.86-22.86Z"></path></svg>
+</file>
+
+<file path="src/components/AppShell.tsx">
+import { ReactNode } from 'react';
+
+export function AppShell({ children }: { children: ReactNode }) {
+    return (
+        <div className="flex flex-col h-screen w-full bg-[#0B0B0C] text-gray-100 overflow-hidden font-sans tracking-tight">
+            {/* Header - Glassmorphism */}
+            <header className="fixed top-0 left-0 right-0 h-16 border-b border-white/[0.08] flex items-center px-6 justify-between shrink-0 bg-[#0B0B0C]/80 backdrop-blur-xl z-50 transition-all duration-300">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-gradient-to-tr from-blue-500 to-purple-500 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
+                        <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                    </div>
+                    <span className="text-lg font-medium text-white/90 tracking-tight">
+                        PhotoRank <span className="text-gray-500 font-normal">AI</span>
+                    </span>
+                </div>
+            </header>
+
+            {/* Main Content - Pad top for fixed header */}
+            <main className="flex-1 flex flex-col pt-16 h-full relative overflow-hidden">
+                {children}
+            </main>
+        </div>
+    );
+}
+</file>
+
+<file path="src/components/DebugConsole.tsx">
+import { useState, useEffect } from 'react';
+import { X, Terminal } from 'lucide-react';
+
+export function DebugConsole() {
+    const [logs, setLogs] = useState<{ time: string, level: string, msg: string }[]>([]);
+    const [isOpen, setIsOpen] = useState(false);
+
+    useEffect(() => {
+        const handleLog = (e: CustomEvent<{ time: string, level: string, msg: string }>) => {
+            setLogs(prev => [...prev.slice(-49), e.detail]);
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        window.addEventListener('app-log', handleLog as any);
+        return () => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            window.removeEventListener('app-log', handleLog as any);
+        };
+    }, []);
+
+    if (!isOpen) {
+        return (
+            <button
+                onClick={() => setIsOpen(true)}
+                className="fixed bottom-4 right-4 bg-black/80 text-green-400 p-2 rounded-lg border border-green-500/30 z-50 hover:bg-black font-mono text-xs flex items-center gap-2"
+            >
+                <Terminal size={14} />
+                Debug Logs
+            </button>
+        );
+    }
+
+    return (
+        <div className="fixed bottom-4 right-4 w-[600px] h-[300px] bg-[#0A0A0A] border border-gray-800 rounded-lg shadow-2xl z-50 flex flex-col font-mono text-xs">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-[#111]">
+                <span className="text-gray-400 font-semibold flex items-center gap-2">
+                    <Terminal size={14} />
+                    System Logs
+                </span>
+                <div className="flex gap-2">
+                    <button onClick={() => setLogs([])} className="text-gray-500 hover:text-white">Clear</button>
+                    <button onClick={() => setIsOpen(false)} className="text-gray-500 hover:text-white"><X size={14} /></button>
+                </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+                {logs.length === 0 && <span className="text-gray-600 italic">No logs yet...</span>}
+                {logs.map((log, i) => (
+                    <div key={i} className="flex gap-2 border-b border-white/5 pb-0.5 mb-0.5">
+                        <span className="text-gray-600 shrink-0">[{log.time}]</span>
+                        <span className={
+                            log.level === 'error' ? 'text-red-400 font-bold' :
+                                log.level === 'warn' ? 'text-yellow-400' :
+                                    log.level === 'success' ? 'text-green-400' : 'text-blue-300'
+                        }>
+                            {log.level.toUpperCase()}
+                        </span>
+                        <span className="text-gray-300 break-all">{log.msg}</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+</file>
 
 <file path="src/components/GlobalErrorBoundary.tsx">
 import React, { Component, ErrorInfo, ReactNode } from "react";
@@ -168,6 +488,244 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
         return this.props.children;
     }
+}
+</file>
+
+<file path="src/components/ScoreBadge.tsx">
+import { Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { motion } from 'framer-motion';
+
+interface ScoreBadgeProps {
+    score?: number;
+    status: 'new' | 'processing' | 'done' | 'queued' | 'analyzing' | 'scored' | 'error';
+    className?: string;
+}
+
+export function ScoreBadge({ score, status, className }: ScoreBadgeProps) {
+    if (status === 'analyzing') {
+        return (
+            <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/20 backdrop-blur-md border border-blue-500/50", className)}>
+                <Loader2 size={12} className="text-blue-400 animate-spin" />
+                <span className="text-xs font-medium text-blue-200">Analyzing...</span>
+            </div>
+        );
+    }
+
+    if (status === 'processing') {
+        return (
+            <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-500/20 backdrop-blur-md border border-gray-500/50", className)}>
+                <Loader2 size={12} className="text-gray-400 animate-spin" />
+                <span className="text-xs font-medium text-gray-200">Preprocessing...</span>
+            </div>
+        );
+    }
+
+    if (status === 'queued') {
+        return (
+            <div className={cn("px-2.5 py-1 rounded-full bg-yellow-500/10 backdrop-blur-md border border-yellow-500/30", className)}>
+                <span className="text-xs font-medium text-yellow-500/80">In Queue</span>
+            </div>
+        );
+    }
+
+    if (status === 'error') {
+        return (
+            <div className={cn("flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/20 backdrop-blur-md border border-red-500/50", className)}>
+                <span className="text-xs font-bold text-red-500">FAILED</span>
+            </div>
+        );
+    }
+
+    if (status !== 'scored' || score === undefined) {
+        return (
+            <div className={cn("px-2.5 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/5", className)}>
+                <span className="text-xs font-medium text-gray-500">Waiting</span>
+            </div>
+        );
+    }
+
+    // Score Logic
+    let colorClass = "";
+    let glowClass = "";
+
+    if (score >= 9.0) {
+        colorClass = "text-[#4ADE80] border-[#4ADE80]/30 bg-[#4ADE80]/10";
+        glowClass = "shadow-[0_0_10px_rgba(74,222,128,0.2)]";
+    } else if (score >= 7.0) {
+        colorClass = "text-[#60A5FA] border-[#60A5FA]/30 bg-[#60A5FA]/10";
+        glowClass = "shadow-[0_0_10px_rgba(96,165,250,0.2)]";
+    } else if (score >= 5.0) {
+        colorClass = "text-[#FB923C] border-[#FB923C]/30 bg-[#FB923C]/10";
+        glowClass = "shadow-[0_0_10px_rgba(251,146,60,0.2)]";
+    } else {
+        colorClass = "text-[#F87171] border-[#F87171]/30 bg-[#F87171]/10";
+        glowClass = "shadow-[0_0_10px_rgba(248,113,113,0.2)]";
+    }
+
+    return (
+        <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className={cn(
+                "px-3 py-1 rounded-full backdrop-blur-md border flex items-center justify-center min-w-[3.5rem]",
+                colorClass,
+                glowClass,
+                className
+            )}
+        >
+            <span className="text-sm font-bold tracking-wide">{score.toFixed(1)}</span>
+        </motion.div>
+    );
+}
+</file>
+
+<file path="src/components/Toolbar.tsx">
+import { ArrowDownWideNarrow, Calendar, Filter, Sparkles } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { motion } from 'framer-motion';
+
+export type SortMode = 'date' | 'score';
+
+interface ToolbarProps {
+    sortMode: SortMode;
+    onSortChange: (mode: SortMode) => void;
+    minScore: number;
+    onMinScoreChange: (score: number) => void;
+}
+
+export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange }: ToolbarProps) {
+    // 根据分数计算颜色，提供视觉反馈
+    const getScoreColor = (s: number) => {
+        if (s >= 8) return "text-emerald-400"; // 高分
+        if (s >= 5) return "text-yellow-400";  // 中分
+        return "text-blue-400";               // 低分/默认
+    };
+
+    const getProgressColor = (s: number) => {
+        if (s >= 8) return "bg-emerald-500";
+        if (s >= 5) return "bg-yellow-500";
+        return "bg-blue-500";
+    };
+
+    return (
+        <div className="h-14 px-6 bg-[#0F0F0F] border-b border-[#262626] flex items-center justify-between z-20 shadow-sm">
+            {/* Left: Sorting Controls */}
+            <div className="flex items-center gap-4">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:block">Sort By</span>
+                <div className="flex bg-[#1A1A1A] p-1 rounded-lg border border-[#262626]">
+                    <button
+                        onClick={() => onSortChange('date')}
+                        className={cn(
+                            "px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all",
+                            sortMode === 'date' ? "bg-[#262626] text-white shadow-sm ring-1 ring-white/10" : "text-gray-500 hover:text-gray-300"
+                        )}
+                    >
+                        <Calendar size={14} />
+                        <span className="hidden sm:inline">Date</span>
+                    </button>
+                    <button
+                        onClick={() => onSortChange('score')}
+                        className={cn(
+                            "px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all",
+                            sortMode === 'score' ? "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-sm" : "text-gray-500 hover:text-gray-300"
+                        )}
+                    >
+                        <ArrowDownWideNarrow size={14} />
+                        <span className="hidden sm:inline">Score</span>
+                    </button>
+                </div>
+            </div>
+
+            {/* Right: Score Filter Slider */}
+            <div className="flex items-center gap-4 flex-1 justify-end max-w-md">
+                <div className="flex items-center gap-2 text-gray-400">
+                    <Filter size={16} />
+                    <span className="text-xs font-medium uppercase tracking-wider">Min Score</span>
+                </div>
+
+                <div className="group relative flex-1 h-10 flex items-center">
+                    {/* Background Track */}
+                    <div className="absolute inset-x-0 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#333]">
+                        {/* Fill Track */}
+                        <motion.div
+                            className={cn("h-full transition-colors duration-300", getProgressColor(minScore))}
+                            initial={false}
+                            animate={{ width: `${(minScore / 10) * 100}%` }}
+                        />
+                    </div>
+
+                    {/* The Range Input (Invisible but interactive) */}
+                    <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        step="0.1"
+                        value={minScore}
+                        onChange={(e) => onMinScoreChange(parseFloat(e.target.value))}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
+                    />
+
+                    {/* Custom Thumb (Visual Only, follows position) */}
+                    <motion.div
+                        className="absolute h-5 w-5 bg-white rounded-full shadow-lg border-2 border-[#1A1A1A] z-10 pointer-events-none flex items-center justify-center"
+                        initial={false}
+                        animate={{ left: `calc(${(minScore / 10) * 100}% - 10px)` }}
+                    >
+                        <div className={cn("w-1.5 h-1.5 rounded-full", getProgressColor(minScore))} />
+                    </motion.div>
+                </div>
+
+                {/* Score Value Indicator */}
+                <div className={cn(
+                    "w-12 text-right font-mono font-bold text-lg transition-colors duration-300",
+                    getScoreColor(minScore)
+                )}>
+                    {minScore > 0 ? minScore.toFixed(1) : <span className="text-gray-600 text-sm">ALL</span>}
+                </div>
+
+                {/* Visual Hint */}
+                {minScore >= 9.0 && (
+                    <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        className="p-1.5 bg-yellow-500/10 rounded-full border border-yellow-500/30"
+                    >
+                        <Sparkles size={14} className="text-yellow-500" />
+                    </motion.div>
+                )}
+            </div>
+        </div>
+    );
+}
+</file>
+
+<file path="src/hooks/useResizeObserver.ts">
+import { useState, useEffect, useRef } from 'react';
+
+export function useResizeObserver<T extends HTMLElement>() {
+    const ref = useRef<T>(null);
+    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+    useEffect(() => {
+        const element = ref.current;
+        if (!element) return;
+
+        const observer = new ResizeObserver((entries) => {
+            if (!entries || entries.length === 0) return;
+            const entry = entries[0];
+            const { width, height } = entry.contentRect;
+            setDimensions({ width, height });
+        });
+
+        observer.observe(element);
+
+        return () => {
+            observer.disconnect();
+        };
+    }, []);
+
+    return { ref, width: dimensions.width, height: dimensions.height };
 }
 </file>
 
@@ -266,12 +824,370 @@ export async function compositeImages(backgroundBlob: Blob, foregroundBlob: Blob
 }
 </file>
 
-<file path="public/vite.svg">
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="31.88" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 257"><defs><linearGradient id="IconifyId1813088fe1fbc01fb466" x1="-.828%" x2="57.636%" y1="7.652%" y2="78.411%"><stop offset="0%" stop-color="#41D1FF"></stop><stop offset="100%" stop-color="#BD34FE"></stop></linearGradient><linearGradient id="IconifyId1813088fe1fbc01fb467" x1="43.376%" x2="50.316%" y1="2.242%" y2="89.03%"><stop offset="0%" stop-color="#FFEA83"></stop><stop offset="8.333%" stop-color="#FFDD35"></stop><stop offset="100%" stop-color="#FFA800"></stop></linearGradient></defs><path fill="url(#IconifyId1813088fe1fbc01fb466)" d="M255.153 37.938L134.897 252.976c-2.483 4.44-8.862 4.466-11.382.048L.875 37.958c-2.746-4.814 1.371-10.646 6.827-9.67l120.385 21.517a6.537 6.537 0 0 0 2.322-.004l117.867-21.483c5.438-.991 9.574 4.796 6.877 9.62Z"></path><path fill="url(#IconifyId1813088fe1fbc01fb467)" d="M185.432.063L96.44 17.501a3.268 3.268 0 0 0-2.634 3.014l-5.474 92.456a3.268 3.268 0 0 0 3.997 3.378l24.777-5.718c2.318-.535 4.413 1.507 3.936 3.838l-7.361 36.047c-.495 2.426 1.782 4.5 4.151 3.78l15.304-4.649c2.372-.72 4.652 1.36 4.15 3.788l-11.698 56.621c-.732 3.542 3.979 5.473 5.943 2.437l1.313-2.028l72.516-144.72c1.215-2.423-.88-5.186-3.54-4.672l-25.505 4.922c-2.396.462-4.435-1.77-3.759-4.114l16.646-57.705c.677-2.35-1.37-4.583-3.769-4.113Z"></path></svg>
+<file path="src/lib/utils.ts">
+import { type ClassValue, clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+    return twMerge(clsx(inputs));
+}
 </file>
 
-<file path="src/assets/react.svg">
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="35.93" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 228"><path fill="#00D8FF" d="M210.483 73.824a171.49 171.49 0 0 0-8.24-2.597c.465-1.9.893-3.777 1.273-5.621c6.238-30.281 2.16-54.676-11.769-62.708c-13.355-7.7-35.196.329-57.254 19.526a171.23 171.23 0 0 0-6.375 5.848a155.866 155.866 0 0 0-4.241-3.917C100.759 3.829 77.587-4.822 63.673 3.233C50.33 10.957 46.379 33.89 51.995 62.588a170.974 170.974 0 0 0 1.892 8.48c-3.28.932-6.445 1.924-9.474 2.98C17.309 83.498 0 98.307 0 113.668c0 15.865 18.582 31.778 46.812 41.427a145.52 145.52 0 0 0 6.921 2.165a167.467 167.467 0 0 0-2.01 9.138c-5.354 28.2-1.173 50.591 12.134 58.266c13.744 7.926 36.812-.22 59.273-19.855a145.567 145.567 0 0 0 5.342-4.923a168.064 168.064 0 0 0 6.92 6.314c21.758 18.722 43.246 26.282 56.54 18.586c13.731-7.949 18.194-32.003 12.4-61.268a145.016 145.016 0 0 0-1.535-6.842c1.62-.48 3.21-.974 4.76-1.488c29.348-9.723 48.443-25.443 48.443-41.52c0-15.417-17.868-30.326-45.517-39.844Zm-6.365 70.984c-1.4.463-2.836.91-4.3 1.345c-3.24-10.257-7.612-21.163-12.963-32.432c5.106-11 9.31-21.767 12.459-31.957c2.619.758 5.16 1.557 7.61 2.4c23.69 8.156 38.14 20.213 38.14 29.504c0 9.896-15.606 22.743-40.946 31.14Zm-10.514 20.834c2.562 12.94 2.927 24.64 1.23 33.787c-1.524 8.219-4.59 13.698-8.382 15.893c-8.067 4.67-25.32-1.4-43.927-17.412a156.726 156.726 0 0 1-6.437-5.87c7.214-7.889 14.423-17.06 21.459-27.246c12.376-1.098 24.068-2.894 34.671-5.345a134.17 134.17 0 0 1 1.386 6.193ZM87.276 214.515c-7.882 2.783-14.16 2.863-17.955.675c-8.075-4.657-11.432-22.636-6.853-46.752a156.923 156.923 0 0 1 1.869-8.499c10.486 2.32 22.093 3.988 34.498 4.994c7.084 9.967 14.501 19.128 21.976 27.15a134.668 134.668 0 0 1-4.877 4.492c-9.933 8.682-19.886 14.842-28.658 17.94ZM50.35 144.747c-12.483-4.267-22.792-9.812-29.858-15.863c-6.35-5.437-9.555-10.836-9.555-15.216c0-9.322 13.897-21.212 37.076-29.293c2.813-.98 5.757-1.905 8.812-2.773c3.204 10.42 7.406 21.315 12.477 32.332c-5.137 11.18-9.399 22.249-12.634 32.792a134.718 134.718 0 0 1-6.318-1.979Zm12.378-84.26c-4.811-24.587-1.616-43.134 6.425-47.789c8.564-4.958 27.502 2.111 47.463 19.835a144.318 144.318 0 0 1 3.841 3.545c-7.438 7.987-14.787 17.08-21.808 26.988c-12.04 1.116-23.565 2.908-34.161 5.309a160.342 160.342 0 0 1-1.76-7.887Zm110.427 27.268a347.8 347.8 0 0 0-7.785-12.803c8.168 1.033 15.994 2.404 23.343 4.08c-2.206 7.072-4.956 14.465-8.193 22.045a381.151 381.151 0 0 0-7.365-13.322Zm-45.032-43.861c5.044 5.465 10.096 11.566 15.065 18.186a322.04 322.04 0 0 0-30.257-.006c4.974-6.559 10.069-12.652 15.192-18.18ZM82.802 87.83a323.167 323.167 0 0 0-7.227 13.238c-3.184-7.553-5.909-14.98-8.134-22.152c7.304-1.634 15.093-2.97 23.209-3.984a321.524 321.524 0 0 0-7.848 12.897Zm8.081 65.352c-8.385-.936-16.291-2.203-23.593-3.793c2.26-7.3 5.045-14.885 8.298-22.6a321.187 321.187 0 0 0 7.257 13.246c2.594 4.48 5.28 8.868 8.038 13.147Zm37.542 31.03c-5.184-5.592-10.354-11.779-15.403-18.433c4.902.192 9.899.29 14.978.29c5.218 0 10.376-.117 15.453-.343c-4.985 6.774-10.018 12.97-15.028 18.486Zm52.198-57.817c3.422 7.8 6.306 15.345 8.596 22.52c-7.422 1.694-15.436 3.058-23.88 4.071a382.417 382.417 0 0 0 7.859-13.026a347.403 347.403 0 0 0 7.425-13.565Zm-16.898 8.101a358.557 358.557 0 0 1-12.281 19.815a329.4 329.4 0 0 1-23.444.823c-7.967 0-15.716-.248-23.178-.732a310.202 310.202 0 0 1-12.513-19.846h.001a307.41 307.41 0 0 1-10.923-20.627a310.278 310.278 0 0 1 10.89-20.637l-.001.001a307.318 307.318 0 0 1 12.413-19.761c7.613-.576 15.42-.876 23.31-.876H128c7.926 0 15.743.303 23.354.883a329.357 329.357 0 0 1 12.335 19.695a358.489 358.489 0 0 1 11.036 20.54a329.472 329.472 0 0 1-11 20.722Zm22.56-122.124c8.572 4.944 11.906 24.881 6.52 51.026c-.344 1.668-.73 3.367-1.15 5.09c-10.622-2.452-22.155-4.275-34.23-5.408c-7.034-10.017-14.323-19.124-21.64-27.008a160.789 160.789 0 0 1 5.888-5.4c18.9-16.447 36.564-22.941 44.612-18.3ZM128 90.808c12.625 0 22.86 10.235 22.86 22.86s-10.235 22.86-22.86 22.86s-22.86-10.235-22.86-22.86s10.235-22.86 22.86-22.86Z"></path></svg>
+<file path="src/App.css">
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+</file>
+
+<file path="src/integration.test.tsx">
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+// Setup IndexedDB BEFORE importing db
+import 'fake-indexeddb/auto';
+
+// Force global assignment just in case
+if (!global.indexedDB) {
+    const { createRequire } = await import('module');
+    const require = createRequire(import.meta.url);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    global.indexedDB = require('fake-indexeddb');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    global.IDBKeyRange = require('fake-indexeddb/lib/IDBKeyRange');
+}
+
+import { db } from './lib/db';
+
+vi.mock('@google/generative-ai', () => {
+    return {
+        GoogleGenerativeAI: class {
+            constructor() { }
+            getGenerativeModel() {
+                return {
+                    generateContent: vi.fn().mockResolvedValue({
+                        response: {
+                            text: () => JSON.stringify({
+                                results: [
+                                    { score: 8.5, reason: "Good composition and lighting." }
+                                ]
+                            })
+                        }
+                    })
+                };
+            }
+        },
+        SchemaType: { OBJECT: 'OBJECT', NUMBER: 'NUMBER', STRING: 'STRING' }
+    };
+});
+
+// Mock Logger
+vi.mock('./lib/logger', () => ({
+    logger: {
+        info: vi.fn(),
+        success: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+    }
+}));
+
+// Mock Blob
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+global.Blob = class Blob {
+    size = 1024;
+    constructor() { }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+
+// Mock FileReader
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+global.FileReader = class FileReader {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onloadend: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onerror: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    result: any;
+    readAsDataURL() {
+        this.result = "data:image/jpeg;base64,mockbase64data";
+        this.onloadend();
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as any;
+
+
+describe('AI Pipeline Integration', () => {
+
+    beforeEach(async () => {
+        vi.resetModules(); // Reset module registry to reset 'hasRecovered' flag
+        await db.open();
+        await db.photos.clear();
+    });
+
+    afterEach(async () => {
+        vi.clearAllMocks();
+    });
+
+    it('should pick up a queued photo and analyze it', async () => {
+        // Dynamic import to allow hasRecovered reset
+        const { useAIPipeline } = await import('./hooks/useAIPipeline');
+
+        // 1. Seed DB with a queued photo
+        const photoId = 'test-photo-1';
+        await db.photos.add({
+            id: photoId,
+            name: 'test.jpg',
+            path: '/tmp/test.jpg',
+            size: 1000,
+            status: 'queued',
+            createdAt: Date.now(),
+            analysisBlob: new Blob(['fake-image-data']),
+        });
+
+        // 2. Render Hook
+        renderHook(() => useAIPipeline());
+
+        // 3. Wait for DB update
+        await waitFor(async () => {
+            const updated = await db.photos.get(photoId);
+            expect(updated?.status).toBe('scored');
+            expect(updated?.score).toBe(8.5);
+            expect(updated?.reason).toBe("Good composition and lighting.");
+        }, { timeout: 5000 });
+
+    });
+
+    it('should recover stuck analyzing tasks', async () => {
+        // Dynamic import
+        const { useAIPipeline } = await import('./hooks/useAIPipeline');
+
+        // 1. Seed DB with a stuck 'analyzing' photo
+        const photoId = 'stuck-photo-1';
+        await db.photos.add({
+            id: photoId,
+            name: 'stuck.jpg',
+            path: '/tmp/stuck.jpg',
+            size: 1000,
+            status: 'analyzing', // Stuck state
+            createdAt: Date.now(),
+            analysisBlob: new Blob(['fake-image-data']),
+        });
+
+        // 2. Render Hook (this mimics a page reload)
+        renderHook(() => useAIPipeline());
+
+        // 3. Expect it to be reset to 'queued' -> then picked up -> then 'scored'
+        await waitFor(async () => {
+            const updated = await db.photos.get(photoId);
+            expect(updated?.status).toBe('scored');
+        }, { timeout: 5000 });
+    });
+});
+</file>
+
+<file path=".check">
+// Placeholder for visual confirmation.
+// I will not actually write to file here, just reassuring myself.
+</file>
+
+<file path=".checker">
+// Dummy check
+</file>
+
+<file path="eslint.config.js">
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+import { defineConfig, globalIgnores } from 'eslint/config'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+      reactHooks.configs.flat.recommended,
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+  },
+])
+</file>
+
+<file path="index.html">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>auto_culling</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+</file>
+
+<file path="postcss.config.js">
+export default {
+    plugins: {
+        tailwindcss: {},
+        autoprefixer: {},
+    },
+}
+</file>
+
+<file path="tailwind.config.js">
+/** @type {import('tailwindcss').Config} */
+export default {
+    darkMode: 'class',
+    content: [
+        "./index.html",
+        "./src/**/*.{js,ts,jsx,tsx}",
+    ],
+    theme: {
+        extend: {},
+    },
+    plugins: [],
+}
+</file>
+
+<file path="tsconfig.app.json">
+{
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    /* Paths */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": [
+    "src"
+  ]
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.app.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ]
+    }
+  }
+}
+</file>
+
+<file path="tsconfig.node.json">
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["vite.config.ts"]
+}
 </file>
 
 <file path="src/components/AdminDashboard.tsx">
@@ -529,264 +1445,15 @@ function StatusBadge({ status }: { status: string }) {
 }
 </file>
 
-<file path="src/components/AppShell.tsx">
-import { ReactNode } from 'react';
-
-export function AppShell({ children }: { children: ReactNode }) {
-    return (
-        <div className="flex flex-col h-screen w-full bg-[#0B0B0C] text-gray-100 overflow-hidden font-sans tracking-tight">
-            {/* Header - Glassmorphism */}
-            <header className="fixed top-0 left-0 right-0 h-16 border-b border-white/[0.08] flex items-center px-6 justify-between shrink-0 bg-[#0B0B0C]/80 backdrop-blur-xl z-50 transition-all duration-300">
-                <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-gradient-to-tr from-blue-500 to-purple-500 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
-                        <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                    </div>
-                    <span className="text-lg font-medium text-white/90 tracking-tight">
-                        PhotoRank <span className="text-gray-500 font-normal">AI</span>
-                    </span>
-                </div>
-            </header>
-
-            {/* Main Content - Pad top for fixed header */}
-            <main className="flex-1 flex flex-col pt-16 h-full relative overflow-hidden">
-                {children}
-            </main>
-        </div>
-    );
-}
-</file>
-
-<file path="src/components/DebugConsole.tsx">
-import { useState, useEffect } from 'react';
-import { X, Terminal } from 'lucide-react';
-
-export function DebugConsole() {
-    const [logs, setLogs] = useState<{ time: string, level: string, msg: string }[]>([]);
-    const [isOpen, setIsOpen] = useState(false);
-
-    useEffect(() => {
-        const handleLog = (e: CustomEvent<{ time: string, level: string, msg: string }>) => {
-            setLogs(prev => [...prev.slice(-49), e.detail]);
-        };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        window.addEventListener('app-log', handleLog as any);
-        return () => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            window.removeEventListener('app-log', handleLog as any);
-        };
-    }, []);
-
-    if (!isOpen) {
-        return (
-            <button
-                onClick={() => setIsOpen(true)}
-                className="fixed bottom-4 right-4 bg-black/80 text-green-400 p-2 rounded-lg border border-green-500/30 z-50 hover:bg-black font-mono text-xs flex items-center gap-2"
-            >
-                <Terminal size={14} />
-                Debug Logs
-            </button>
-        );
-    }
-
-    return (
-        <div className="fixed bottom-4 right-4 w-[600px] h-[300px] bg-[#0A0A0A] border border-gray-800 rounded-lg shadow-2xl z-50 flex flex-col font-mono text-xs">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-[#111]">
-                <span className="text-gray-400 font-semibold flex items-center gap-2">
-                    <Terminal size={14} />
-                    System Logs
-                </span>
-                <div className="flex gap-2">
-                    <button onClick={() => setLogs([])} className="text-gray-500 hover:text-white">Clear</button>
-                    <button onClick={() => setIsOpen(false)} className="text-gray-500 hover:text-white"><X size={14} /></button>
-                </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
-                {logs.length === 0 && <span className="text-gray-600 italic">No logs yet...</span>}
-                {logs.map((log, i) => (
-                    <div key={i} className="flex gap-2 border-b border-white/5 pb-0.5 mb-0.5">
-                        <span className="text-gray-600 shrink-0">[{log.time}]</span>
-                        <span className={
-                            log.level === 'error' ? 'text-red-400 font-bold' :
-                                log.level === 'warn' ? 'text-yellow-400' :
-                                    log.level === 'success' ? 'text-green-400' : 'text-blue-300'
-                        }>
-                            {log.level.toUpperCase()}
-                        </span>
-                        <span className="text-gray-300 break-all">{log.msg}</span>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-}
-</file>
-
-<file path="src/components/ScoreBadge.tsx">
-import { Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { motion } from 'framer-motion';
-
-interface ScoreBadgeProps {
-    score?: number;
-    status: 'new' | 'processing' | 'done' | 'queued' | 'analyzing' | 'scored' | 'error';
-    className?: string;
-}
-
-export function ScoreBadge({ score, status, className }: ScoreBadgeProps) {
-    if (status === 'analyzing') {
-        return (
-            <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/20 backdrop-blur-md border border-blue-500/50", className)}>
-                <Loader2 size={12} className="text-blue-400 animate-spin" />
-                <span className="text-xs font-medium text-blue-200">Analyzing...</span>
-            </div>
-        );
-    }
-
-    if (status === 'processing') {
-        return (
-            <div className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-500/20 backdrop-blur-md border border-gray-500/50", className)}>
-                <Loader2 size={12} className="text-gray-400 animate-spin" />
-                <span className="text-xs font-medium text-gray-200">Preprocessing...</span>
-            </div>
-        );
-    }
-
-    if (status === 'queued') {
-        return (
-            <div className={cn("px-2.5 py-1 rounded-full bg-yellow-500/10 backdrop-blur-md border border-yellow-500/30", className)}>
-                <span className="text-xs font-medium text-yellow-500/80">In Queue</span>
-            </div>
-        );
-    }
-
-    if (status === 'error') {
-        return (
-            <div className={cn("flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/20 backdrop-blur-md border border-red-500/50", className)}>
-                <span className="text-xs font-bold text-red-500">FAILED</span>
-            </div>
-        );
-    }
-
-    if (status !== 'scored' || score === undefined) {
-        return (
-            <div className={cn("px-2.5 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/5", className)}>
-                <span className="text-xs font-medium text-gray-500">Waiting</span>
-            </div>
-        );
-    }
-
-    // Score Logic
-    let colorClass = "";
-    let glowClass = "";
-
-    if (score >= 9.0) {
-        colorClass = "text-[#4ADE80] border-[#4ADE80]/30 bg-[#4ADE80]/10";
-        glowClass = "shadow-[0_0_10px_rgba(74,222,128,0.2)]";
-    } else if (score >= 7.0) {
-        colorClass = "text-[#60A5FA] border-[#60A5FA]/30 bg-[#60A5FA]/10";
-        glowClass = "shadow-[0_0_10px_rgba(96,165,250,0.2)]";
-    } else if (score >= 5.0) {
-        colorClass = "text-[#FB923C] border-[#FB923C]/30 bg-[#FB923C]/10";
-        glowClass = "shadow-[0_0_10px_rgba(251,146,60,0.2)]";
-    } else {
-        colorClass = "text-[#F87171] border-[#F87171]/30 bg-[#F87171]/10";
-        glowClass = "shadow-[0_0_10px_rgba(248,113,113,0.2)]";
-    }
-
-    return (
-        <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className={cn(
-                "px-3 py-1 rounded-full backdrop-blur-md border flex items-center justify-center min-w-[3.5rem]",
-                colorClass,
-                glowClass,
-                className
-            )}
-        >
-            <span className="text-sm font-bold tracking-wide">{score.toFixed(1)}</span>
-        </motion.div>
-    );
-}
-</file>
-
-<file path="src/components/Toolbar.tsx">
-import { ArrowDownWideNarrow, Calendar, Filter } from 'lucide-react';
-import { cn } from '@/lib/utils';
-
-export type SortMode = 'date' | 'score';
-
-interface ToolbarProps {
-    sortMode: SortMode;
-    onSortChange: (mode: SortMode) => void;
-    minScore: number;
-    onMinScoreChange: (score: number) => void;
-}
-
-export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange }: ToolbarProps) {
-    return (
-        <div className="h-12 px-6 bg-[#0F0F0F] border-b border-[#262626] flex items-center justify-between z-20">
-            <div className="flex items-center gap-2">
-                <div className="flex bg-[#1A1A1A] p-1 rounded-lg border border-[#262626]">
-                    <button
-                        onClick={() => onSortChange('date')}
-                        className={cn(
-                            "px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all",
-                            sortMode === 'date' ? "bg-[#262626] text-white shadow-sm" : "text-gray-500 hover:text-gray-300"
-                        )}
-                    >
-                        <Calendar size={14} /> Date
-                    </button>
-                    <button
-                        onClick={() => onSortChange('score')}
-                        className={cn(
-                            "px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-all",
-                            sortMode === 'score' ? "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-sm" : "text-gray-500 hover:text-gray-300"
-                        )}
-                    >
-                        <ArrowDownWideNarrow size={14} /> Score
-                    </button>
-                </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-[#1A1A1A] rounded-lg border border-[#262626]">
-                    <Filter size={14} className="text-gray-400" />
-                    <span className="text-xs text-gray-400 font-medium">Min Score:</span>
-                    <select
-                        value={minScore}
-                        onChange={(e) => onMinScoreChange(Number(e.target.value))}
-                        className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"
-                    >
-                        <option value={0}>All</option>
-                        <option value={5}>5.0+</option>
-                        <option value={7}>7.0+</option>
-                        <option value={8}>8.0+</option>
-                        <option value={9}>9.0+</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-    );
-}
-</file>
-
 <file path="src/hooks/useAutoOptimizer.ts">
 import { useState } from 'react';
 import { db, PhotoMetadata } from '@/lib/db';
 import {
-    analyzePhotosBatch,
-    detectImageContent,
-    extractSubjectWithGemini,
-    removeSubjectFromImage,
-    optimizeBackground,
-    mergeAndHarmonize,
     analyzeLightingCondition,
-    optimizeLandscape,
-    evaluateLandscape // 新增
+    detectImageContent,
 } from '@/lib/gemini';
+import { runPortraitWorkflow } from '@/lib/portrait-workflow';
+import { runLandscapeWorkflow } from '@/lib/landscape-workflow';
 import { logger } from '@/lib/logger';
 import { toast } from 'sonner';
 
@@ -825,96 +1492,30 @@ export function useAutoOptimizer() {
             let currentScore = 0;
 
             if (contentInfo.hasLivingBeings && contentInfo.subjectType === 'person') {
-                logger.info("🚀 人像模式 (极简流程)");
-
-                // 2. 提出人像 (Layer A)
-                toast.loading("Step 2: 提取人像...", { id: toastId });
-                const personLayer = await extractSubjectWithGemini(currentBlob);
-
-                // 3. 生成无人背景 (Layer B)
-                toast.loading("Step 3: 移除主体...", { id: toastId });
-                const cleanBackground = await removeSubjectFromImage(currentBlob);
-
-                // 4. 优化背景 (Layer C) - 传入光影信息
-                toast.loading("Step 4: 匹配环境光...", { id: toastId });
-                const optimizedBackground = await optimizeBackground(cleanBackground, lightingInfo);
-
-                // 5. 融合 (Merge) - 传入光影信息
-                toast.loading("Step 5: 影楼级合成...", { id: toastId });
-                finalResultBlob = await mergeAndHarmonize(
-                    currentBlob,        // 原图 (保真)
-                    personLayer,        // 形状
-                    optimizedBackground, // 氛围
-                    lightingInfo        // 光影上下文
-                );
-
-                // 评分
-                const finalRes = await analyzePhotosBatch([{ id: 'final', blob: finalResultBlob }]);
-                currentScore = finalRes[0].score;
-                currentReason = "Enhanced portrait with preserved identity.";
-
+                const res = await runPortraitWorkflow(currentBlob, toastId);
+                finalResultBlob = res.blob;
+                currentScore = res.score;
+                currentReason = res.reason;
             } else {
-                // --- 风景模式：智能迭代循环 (Feedback Loop) ---
-                logger.info("🏞️ 风景模式 (智能迭代版)");
-
-                let loopBlob = currentBlob;
-                let loopScore = 0;
-                let loopReason = "Initial Capture";
-                let iteration = 0;
-                const MAX_LOOPS = 3;    // 最多跑3轮
-                const TARGET_SCORE_LANDSCAPE = 8.0; // 目标分
-
-                // 循环开始
-                while (iteration < MAX_LOOPS) {
-                    iteration++;
-                    toast.loading(`Round ${iteration}: AI 正在评审 & 思考...`, { id: toastId });
-
-                    // 1. 评分 & 获取修改意见 (Flash)
-                    const evalResult = await evaluateLandscape(loopBlob);
-                    loopScore = evalResult.score;
-                    loopReason = evalResult.critique;
-
-                    logger.info(`[Loop ${iteration}] Score: ${loopScore}, Fix: ${evalResult.improvementPrompt}`);
-
-                    // 达标检测：如果分数够了，或者已经在最后一轮了，就跳出
-                    if (loopScore >= TARGET_SCORE_LANDSCAPE) {
-                        toast.success(`达标! 分数: ${loopScore}`, { id: toastId });
-                        break;
-                    }
-                    if (iteration === MAX_LOOPS) {
-                        toast("已达到最大优化次数", { id: toastId });
-                        break;
-                    }
-
-                    // 2. 执行精修 (Image Pro)
-                    toast.loading(`Round ${iteration}: 正在执行: ${evalResult.critique.slice(0, 20)}...`, { id: toastId });
-                    try {
-                        loopBlob = await optimizeLandscape(loopBlob, evalResult.improvementPrompt);
-                    } catch (e) {
-                        logger.error("生成失败，保留上一轮结果", e);
-                        break; // 如果生成挂了，就用上一次的好图
-                    }
-                }
-
-                // 循环结束，赋值给最终结果
-                finalResultBlob = loopBlob;
-                currentScore = loopScore;
-                currentReason = `[Loop x${iteration}] ${loopReason}`;
+                const res = await runLandscapeWorkflow(currentBlob, toastId);
+                finalResultBlob = res.blob;
+                currentScore = res.score;
+                currentReason = res.reason;
             }
 
-            // 保存
+            // Save Result
             await db.photos.update(photo.id, {
                 analysisBlob: finalResultBlob,
                 previewBlob: finalResultBlob,
                 score: currentScore,
-                // 如果之前没存过原分，且当前有分，则备份当前分；否则保持原样
+                // Backup original score if not exists
                 originalScore: photo.originalScore ?? photo.score,
                 reason: currentReason,
                 status: 'scored',
                 updatedAt: Date.now()
             });
 
-            toast.success(`精修完成: ${currentScore.toFixed(1)}`, { id: toastId });
+            toast.success(`Done: ${currentScore.toFixed(1)}`, { id: toastId });
             window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
 
         } catch (error) {
@@ -927,607 +1528,6 @@ export function useAutoOptimizer() {
 
     return { startOptimization, isOptimizing };
 }
-</file>
-
-<file path="src/hooks/useResizeObserver.ts">
-import { useState, useEffect, useRef } from 'react';
-
-export function useResizeObserver<T extends HTMLElement>() {
-    const ref = useRef<T>(null);
-    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-
-    useEffect(() => {
-        const element = ref.current;
-        if (!element) return;
-
-        const observer = new ResizeObserver((entries) => {
-            if (!entries || entries.length === 0) return;
-            const entry = entries[0];
-            const { width, height } = entry.contentRect;
-            setDimensions({ width, height });
-        });
-
-        observer.observe(element);
-
-        return () => {
-            observer.disconnect();
-        };
-    }, []);
-
-    return { ref, width: dimensions.width, height: dimensions.height };
-}
-</file>
-
-<file path="src/lib/utils.ts">
-import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-export function cn(...inputs: ClassValue[]) {
-    return twMerge(clsx(inputs));
-}
-</file>
-
-<file path="src/App.css">
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
-
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
-}
-</file>
-
-<file path="src/integration.test.tsx">
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
-// Setup IndexedDB BEFORE importing db
-import 'fake-indexeddb/auto';
-
-// Force global assignment just in case
-if (!global.indexedDB) {
-    const { createRequire } = await import('module');
-    const require = createRequire(import.meta.url);
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    global.indexedDB = require('fake-indexeddb');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    global.IDBKeyRange = require('fake-indexeddb/lib/IDBKeyRange');
-}
-
-import { db } from './lib/db';
-
-vi.mock('@google/generative-ai', () => {
-    return {
-        GoogleGenerativeAI: class {
-            constructor() { }
-            getGenerativeModel() {
-                return {
-                    generateContent: vi.fn().mockResolvedValue({
-                        response: {
-                            text: () => JSON.stringify({
-                                results: [
-                                    { score: 8.5, reason: "Good composition and lighting." }
-                                ]
-                            })
-                        }
-                    })
-                };
-            }
-        },
-        SchemaType: { OBJECT: 'OBJECT', NUMBER: 'NUMBER', STRING: 'STRING' }
-    };
-});
-
-// Mock Logger
-vi.mock('./lib/logger', () => ({
-    logger: {
-        info: vi.fn(),
-        success: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-    }
-}));
-
-// Mock Blob
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-global.Blob = class Blob {
-    size = 1024;
-    constructor() { }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-} as any;
-
-// Mock FileReader
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-global.FileReader = class FileReader {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onloadend: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onerror: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    result: any;
-    readAsDataURL() {
-        this.result = "data:image/jpeg;base64,mockbase64data";
-        this.onloadend();
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-} as any;
-
-
-describe('AI Pipeline Integration', () => {
-
-    beforeEach(async () => {
-        vi.resetModules(); // Reset module registry to reset 'hasRecovered' flag
-        await db.open();
-        await db.photos.clear();
-    });
-
-    afterEach(async () => {
-        vi.clearAllMocks();
-    });
-
-    it('should pick up a queued photo and analyze it', async () => {
-        // Dynamic import to allow hasRecovered reset
-        const { useAIPipeline } = await import('./hooks/useAIPipeline');
-
-        // 1. Seed DB with a queued photo
-        const photoId = 'test-photo-1';
-        await db.photos.add({
-            id: photoId,
-            name: 'test.jpg',
-            path: '/tmp/test.jpg',
-            size: 1000,
-            status: 'queued',
-            createdAt: Date.now(),
-            analysisBlob: new Blob(['fake-image-data']),
-        });
-
-        // 2. Render Hook
-        renderHook(() => useAIPipeline());
-
-        // 3. Wait for DB update
-        await waitFor(async () => {
-            const updated = await db.photos.get(photoId);
-            expect(updated?.status).toBe('scored');
-            expect(updated?.score).toBe(8.5);
-            expect(updated?.reason).toBe("Good composition and lighting.");
-        }, { timeout: 5000 });
-
-    });
-
-    it('should recover stuck analyzing tasks', async () => {
-        // Dynamic import
-        const { useAIPipeline } = await import('./hooks/useAIPipeline');
-
-        // 1. Seed DB with a stuck 'analyzing' photo
-        const photoId = 'stuck-photo-1';
-        await db.photos.add({
-            id: photoId,
-            name: 'stuck.jpg',
-            path: '/tmp/stuck.jpg',
-            size: 1000,
-            status: 'analyzing', // Stuck state
-            createdAt: Date.now(),
-            analysisBlob: new Blob(['fake-image-data']),
-        });
-
-        // 2. Render Hook (this mimics a page reload)
-        renderHook(() => useAIPipeline());
-
-        // 3. Expect it to be reset to 'queued' -> then picked up -> then 'scored'
-        await waitFor(async () => {
-            const updated = await db.photos.get(photoId);
-            expect(updated?.status).toBe('scored');
-        }, { timeout: 5000 });
-    });
-});
-</file>
-
-<file path="src/main.tsx">
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.tsx'
-import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <GlobalErrorBoundary>
-      <App />
-    </GlobalErrorBoundary>
-  </StrictMode>,
-)
-</file>
-
-<file path=".check">
-// Placeholder for visual confirmation.
-// I will not actually write to file here, just reassuring myself.
-</file>
-
-<file path=".checker">
-// Dummy check
-</file>
-
-<file path="eslint.config.js">
-import js from '@eslint/js'
-import globals from 'globals'
-import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
-import tseslint from 'typescript-eslint'
-import { defineConfig, globalIgnores } from 'eslint/config'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      js.configs.recommended,
-      tseslint.configs.recommended,
-      reactHooks.configs.flat.recommended,
-      reactRefresh.configs.vite,
-    ],
-    languageOptions: {
-      ecmaVersion: 2020,
-      globals: globals.browser,
-    },
-  },
-])
-</file>
-
-<file path="index.html">
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>auto_culling</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-</file>
-
-<file path="postcss.config.js">
-export default {
-    plugins: {
-        tailwindcss: {},
-        autoprefixer: {},
-    },
-}
-</file>
-
-<file path="tailwind.config.js">
-/** @type {import('tailwindcss').Config} */
-export default {
-    darkMode: 'class',
-    content: [
-        "./index.html",
-        "./src/**/*.{js,ts,jsx,tsx}",
-    ],
-    theme: {
-        extend: {},
-    },
-    plugins: [],
-}
-</file>
-
-<file path="tsconfig.app.json">
-{
-  "compilerOptions": {
-    "composite": true,
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
-    "target": "ES2020",
-    "useDefineForClassFields": true,
-    "lib": [
-      "ES2020",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "module": "ESNext",
-    "skipLibCheck": true,
-    /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "moduleDetection": "force",
-    "noEmit": true,
-    "jsx": "react-jsx",
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true,
-    /* Paths */
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    }
-  },
-  "include": [
-    "src"
-  ]
-}
-</file>
-
-<file path="tsconfig.json">
-{
-  "files": [],
-  "references": [
-    {
-      "path": "./tsconfig.app.json"
-    },
-    {
-      "path": "./tsconfig.node.json"
-    }
-  ],
-  "compilerOptions": {
-    "baseUrl": ".",
-    "paths": {
-      "@/*": [
-        "src/*"
-      ]
-    }
-  }
-}
-</file>
-
-<file path="tsconfig.node.json">
-{
-  "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
-    "target": "ES2023",
-    "lib": ["ES2023"],
-    "module": "ESNext",
-    "types": ["node"],
-    "skipLibCheck": true,
-
-    /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "moduleDetection": "force",
-    "noEmit": true,
-
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
-  },
-  "include": ["vite.config.ts"]
-}
-</file>
-
-<file path="src/components/Header.tsx">
-import { FolderOpen, Settings, ImagePlus } from 'lucide-react'; // 引入 ImagePlus 图标
-import { motion } from 'framer-motion';
-
-interface HeaderProps {
-    onOpenFolder: () => void;
-    onOpenFiles: () => void; // 新增：打开文件选择器的回调
-    onOpenAdmin?: () => void;
-    onRetry?: () => void;
-    total: number;
-    processed: number;
-    analyzed: number;
-    queueLength: number;
-    analyzingCount: number;
-    errorCount: number;
-    supportsFileSystemAccess?: boolean;
-}
-
-export function Header({ onOpenFolder, onOpenFiles, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
-    const processingProgress = total > 0 ? (processed / total) * 100 : 0;
-    const analysisProgress = total > 0 ? (analyzed / total) * 100 : 0;
-
-    return (
-        <header className="h-16 px-6 border-b border-[#262626] bg-[#0F0F0F] flex items-center justify-between z-30 relative shadow-sm">
-            {/* Left: Logo */}
-            <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
-                    PR
-                </div>
-                <div>
-                    <h1 className="text-lg font-bold text-white tracking-tight leading-none">
-                        PhotoRank <span className="text-blue-500">AI</span>
-                    </h1>
-                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider bg-[#1A1A1A] px-1.5 py-0.5 rounded border border-[#262626]">v1.0 Pro</span>
-                </div>
-            </div>
-
-            {/* Middle: Dual Progress */}
-            {total > 0 && (
-                <div className="flex-1 max-w-xl mx-8 flex flex-col gap-2">
-                    {/* Bar 1: Local Processing */}
-                    <div className="flex items-center gap-3 text-xs">
-                        <span className="w-20 text-gray-400 text-right">Preprocessing</span>
-                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
-                            <motion.div
-                                className="h-full bg-blue-500"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${processingProgress}% ` }}
-                                transition={{ ease: "easeInOut" }}
-                            />
-                        </div>
-                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(processingProgress)}%</span>
-                    </div>
-
-                    {/* Bar 2: AI Analysis */}
-                    <div className="flex items-center gap-3 text-xs">
-                        <div className="w-20 flex justify-end">
-                            <span className="text-gray-400 text-right">AI Grading</span>
-                        </div>
-                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
-                            <motion.div
-                                className="h-full bg-purple-500"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${analysisProgress}% ` }}
-                                transition={{ ease: "easeInOut" }}
-                            />
-                        </div>
-                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(analysisProgress)}%</span>
-                    </div>
-                </div>
-            )}
-
-            {/* Pipeline Stats */}
-            {total > 0 && (
-                <div className="mr-6 flex items-center gap-4 text-xs font-mono text-gray-500 border-r border-[#262626] pr-6">
-                    <div className="flex flex-col items-end">
-                        <span className={queueLength > 0 ? "text-yellow-500" : "text-gray-600"}>Queue: {queueLength}</span>
-                        <span className={analyzingCount > 0 ? "text-purple-400 animate-pulse" : "text-gray-600"}>Analyzing: {analyzingCount}</span>
-                        {errorCount > 0 && (
-                            <button
-                                onClick={onRetry}
-                                className="text-red-400 hover:text-red-300 underline decoration-red-500/30 underline-offset-2 transition-colors mt-0.5"
-                            >
-                                Errors: {errorCount} (Retry?)
-                            </button>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* Right: Actions */}
-            <div className="flex items-center gap-3">
-                {/* Admin Button - Hidden in Prod, accessible via Alt+Shift+A */}
-                {import.meta.env.DEV && (
-                    <button
-                        onClick={onOpenAdmin}
-                        title="Admin Console (Alt+Shift+A)"
-                        className="p-2.5 bg-[#1A1A1A] text-gray-400 border border-[#262626] rounded-xl hover:text-white hover:bg-[#262626] transition-all active:scale-95"
-                    >
-                        <Settings size={18} />
-                    </button>
-                )}
-
-                {/* 拆分为两个明确的按钮 */}
-                <button
-                    onClick={onOpenFiles}
-                    title="Select individual photos to analyze"
-                    className="flex items-center gap-2 px-4 py-2 bg-[#1A1A1A] text-white border border-[#262626] rounded-lg text-sm font-semibold hover:bg-[#262626] transition-colors active:scale-95 duration-100"
-                >
-                    <ImagePlus size={16} className="text-blue-500" />
-                    Add Photos
-                </button>
-
-                {supportsFileSystemAccess ? (
-                    <button
-                        onClick={onOpenFolder}
-                        title="Import a full folder (Standard Mode)"
-                        className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-95 duration-100"
-                    >
-                        <FolderOpen size={16} />
-                        Import Folder
-                    </button>
-                ) : null}
-            </div>
-        </header>
-    );
-}
-</file>
-
-<file path="src/lib/logger.ts">
-// Imports removed as unused
-export enum LogLevel {
-    INFO = 'info',
-    WARN = 'warn',
-    ERROR = 'error',
-    SUCCESS = 'success'
-}
-
-export interface LogEntry {
-    id?: number;
-    timestamp: number;
-    level: LogLevel;
-    message: string;
-    details?: unknown;
-}
-
-class LoggerService {
-    async log(level: LogLevel, message: string, details?: unknown) {
-        // const entry: LogEntry = {
-        //     timestamp: Date.now(),
-        //     level,
-        //     message,
-        //     details
-        // };
-
-        // Emit Custom Event for UI
-        if (typeof window !== 'undefined') {
-            const event = new CustomEvent('app-log', {
-                detail: {
-                    time: new Date().toLocaleTimeString(),
-                    level,
-                    msg: message + (details ? ' ' + JSON.stringify(details) : '')
-                }
-            });
-            window.dispatchEvent(event);
-        }
-
-        // Log to console for dev (Silenced for Production Cleanliness)
-        if (import.meta.env.DEV || level === 'error') {
-            const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
-            console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
-        }
-
-        // Persist to DB (Simulated/Optional for now to prevent schema errors if not updated)
-        try {
-            // await db.table('logs').add(entry);
-        } catch (e) {
-            console.error("Failed to write log", e);
-        }
-    }
-
-    info(message: string, details?: unknown) { this.log(LogLevel.INFO, message, details); }
-    success(message: string, details?: unknown) { this.log(LogLevel.SUCCESS, message, details); }
-    warn(message: string, details?: unknown) { this.log(LogLevel.WARN, message, details); }
-    error(message: string, details?: unknown) { this.log(LogLevel.ERROR, message, details); }
-}
-
-export const logger = new LoggerService();
 </file>
 
 <file path="src/workers/imageProcessor.worker.ts">
@@ -1544,8 +1544,8 @@ self.onmessage = async (e: MessageEvent) => {
         // 1. Generate Thumbnail (300px)
         const thumbBlob = await resizeImage(bitmap, 300);
 
-        // 2. Generate Analysis (1024px)
-        const analysisBlob = await resizeImage(bitmap, 1024);
+        // 2. Generate Analysis (512px) - Optimized for Token Usage
+        const analysisBlob = await resizeImage(bitmap, 512);
 
         console.log(`[Worker] Processing ${id}: Compression Complete. Thumb=${thumbBlob?.size}, Analysis=${analysisBlob?.size}`);
 
@@ -1686,6 +1686,22 @@ body {
 }
 </file>
 
+<file path="src/main.tsx">
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <GlobalErrorBoundary>
+      <App />
+    </GlobalErrorBoundary>
+  </StrictMode>,
+)
+</file>
+
 <file path="src/vite-env.d.ts">
 /// <reference types="vite/client" />
 
@@ -1821,6 +1837,135 @@ export default defineConfig({
     globals: true
   }
 })
+</file>
+
+<file path="src/components/Header.tsx">
+import { FolderOpen, Settings, ImagePlus } from 'lucide-react'; // 引入 ImagePlus 图标
+import { motion } from 'framer-motion';
+
+interface HeaderProps {
+    onOpenFolder: () => void;
+    onOpenFiles: () => void; // 新增：打开文件选择器的回调
+    onOpenAdmin?: () => void;
+    onRetry?: () => void;
+    total: number;
+    processed: number;
+    analyzed: number;
+    queueLength: number;
+    analyzingCount: number;
+    errorCount: number;
+    supportsFileSystemAccess?: boolean;
+}
+
+export function Header({ onOpenFolder, onOpenFiles, onOpenAdmin, onRetry, total, processed, analyzed, queueLength, analyzingCount, errorCount, supportsFileSystemAccess = true }: HeaderProps) {
+    const processingProgress = total > 0 ? (processed / total) * 100 : 0;
+    const analysisProgress = total > 0 ? (analyzed / total) * 100 : 0;
+
+    return (
+        <header className="h-16 px-6 border-b border-[#262626] bg-[#0F0F0F] flex items-center justify-between z-30 relative shadow-sm">
+            {/* Left: Logo */}
+            <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
+                    PR
+                </div>
+                <div>
+                    <h1 className="text-lg font-bold text-white tracking-tight leading-none">
+                        PhotoRank <span className="text-blue-500">AI</span>
+                    </h1>
+                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider bg-[#1A1A1A] px-1.5 py-0.5 rounded border border-[#262626]">v1.0 Pro</span>
+                </div>
+            </div>
+
+            {/* Middle: Dual Progress */}
+            {total > 0 && (
+                <div className="flex-1 max-w-xl mx-8 flex flex-col gap-2">
+                    {/* Bar 1: Local Processing */}
+                    <div className="flex items-center gap-3 text-xs">
+                        <span className="w-20 text-gray-400 text-right">Preprocessing</span>
+                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
+                            <motion.div
+                                className="h-full bg-blue-500"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${processingProgress}% ` }}
+                                transition={{ ease: "easeInOut" }}
+                            />
+                        </div>
+                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(processingProgress)}%</span>
+                    </div>
+
+                    {/* Bar 2: AI Analysis */}
+                    <div className="flex items-center gap-3 text-xs">
+                        <div className="w-20 flex justify-end">
+                            <span className="text-gray-400 text-right">AI Grading</span>
+                        </div>
+                        <div className="flex-1 h-1.5 bg-[#1A1A1A] rounded-full overflow-hidden border border-[#262626]">
+                            <motion.div
+                                className="h-full bg-purple-500"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${analysisProgress}% ` }}
+                                transition={{ ease: "easeInOut" }}
+                            />
+                        </div>
+                        <span className="w-8 text-gray-500 font-mono text-right">{Math.round(analysisProgress)}%</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Pipeline Stats */}
+            {total > 0 && (
+                <div className="mr-6 flex items-center gap-4 text-xs font-mono text-gray-500 border-r border-[#262626] pr-6">
+                    <div className="flex flex-col items-end">
+                        <span className={queueLength > 0 ? "text-yellow-500" : "text-gray-600"}>Queue: {queueLength}</span>
+                        <span className={analyzingCount > 0 ? "text-purple-400 animate-pulse" : "text-gray-600"}>Analyzing: {analyzingCount}</span>
+                        {errorCount > 0 && (
+                            <button
+                                onClick={onRetry}
+                                className="text-red-400 hover:text-red-300 underline decoration-red-500/30 underline-offset-2 transition-colors mt-0.5"
+                            >
+                                Errors: {errorCount} (Retry?)
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Right: Actions */}
+            <div className="flex items-center gap-3">
+                {/* Admin Button - Hidden in Prod, accessible via Alt+Shift+A */}
+                {import.meta.env.DEV && (
+                    <button
+                        onClick={onOpenAdmin}
+                        title="Admin Console (Alt+Shift+A)"
+                        className="p-2.5 bg-[#1A1A1A] text-gray-400 border border-[#262626] rounded-xl hover:text-white hover:bg-[#262626] transition-all active:scale-95"
+                    >
+                        <Settings size={18} />
+                    </button>
+                )}
+
+                {/* 拆分为两个明确的按钮 */}
+                <button
+                    onClick={onOpenFiles}
+                    title="Select individual photos to analyze"
+                    className="flex items-center gap-2 px-4 py-2 bg-[#1A1A1A] text-white border border-[#262626] rounded-lg text-sm font-semibold hover:bg-[#262626] transition-colors active:scale-95 duration-100"
+                >
+                    <ImagePlus size={16} className="text-blue-500" />
+                    Add Photos
+                </button>
+
+                {supportsFileSystemAccess ? (
+                    <button
+                        onClick={onOpenFolder}
+                        title="Import a full folder (Standard Mode)"
+                        className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors shadow-lg shadow-white/5 active:scale-95 duration-100"
+                    >
+                        <FolderOpen size={16} />
+                        Import Folder
+                    </button>
+                ) : null}
+            </div>
+        </header>
+    );
+}
 </file>
 
 <file path="src/components/PhotoCard.tsx">
@@ -1994,6 +2139,206 @@ export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView }: Photo
             />
         </div>
     );
+}
+</file>
+
+<file path="src/lib/logger.ts">
+// Imports removed as unused
+export enum LogLevel {
+    INFO = 'info',
+    WARN = 'warn',
+    ERROR = 'error',
+    SUCCESS = 'success'
+}
+
+export interface LogEntry {
+    id?: number;
+    timestamp: number;
+    level: LogLevel;
+    message: string;
+    details?: unknown;
+}
+
+class LoggerService {
+    async log(level: LogLevel, message: string, details?: unknown) {
+        // const entry: LogEntry = {
+        //     timestamp: Date.now(),
+        //     level,
+        //     message,
+        //     details
+        // };
+
+        // Emit Custom Event for UI
+        if (typeof window !== 'undefined') {
+            const event = new CustomEvent('app-log', {
+                detail: {
+                    time: new Date().toLocaleTimeString(),
+                    level,
+                    msg: message + (details ? ' ' + JSON.stringify(details) : '')
+                }
+            });
+            window.dispatchEvent(event);
+        }
+
+        // Log to console for dev (Silenced for Production Cleanliness)
+        if (import.meta.env.DEV || level === 'error') {
+            const style = level === 'error' ? 'color: red' : level === 'success' ? 'color: green' : 'color: blue';
+            console.log(`%c[${level.toUpperCase()}] ${message}`, style, details || '');
+        }
+
+        // Persist to DB (Simulated/Optional for now to prevent schema errors if not updated)
+        try {
+            // await db.table('logs').add(entry);
+        } catch (e) {
+            console.error("Failed to write log", e);
+        }
+    }
+
+    info(message: string, details?: unknown) { this.log(LogLevel.INFO, message, details); }
+    success(message: string, details?: unknown) { this.log(LogLevel.SUCCESS, message, details); }
+    warn(message: string, details?: unknown) { this.log(LogLevel.WARN, message, details); }
+    error(message: string, details?: unknown) { this.log(LogLevel.ERROR, message, details); }
+}
+
+export const logger = new LoggerService();
+</file>
+
+<file path="src/hooks/useDirectoryLoader.ts">
+import { useState, useCallback } from 'react';
+import { logger } from '@/lib/logger';
+
+export interface FileEntry {
+    id: string; // absolute path or unique identifier
+    handle?: FileSystemFileHandle;
+    file?: File;
+    name: string;
+    path: string; // relative path within the imported directory
+}
+
+export function useDirectoryLoader() {
+    const [isLoading, setIsLoading] = useState(false);
+    const [files, setFiles] = useState<FileEntry[]>([]);
+    const [error, setError] = useState<string | null>(null);
+
+    const [abortController, setAbortController] = useState<AbortController | null>(null);
+
+    const cancelLoad = useCallback(() => {
+        if (abortController) {
+            abortController.abort();
+            setAbortController(null);
+            setIsLoading(false);
+            logger.info('Operation cancelled by user');
+        }
+    }, [abortController]);
+
+    const loadDirectory = useCallback(async () => {
+        const controller = new AbortController();
+        setAbortController(controller);
+
+        logger.info('Opening directory picker...');
+        setIsLoading(true);
+        setError(null);
+        try {
+            const dirHandle = await window.showDirectoryPicker();
+            if (controller.signal.aborted) return;
+
+            const entries: FileEntry[] = [];
+            let skippedCount = 0;
+            async function scanDirectory(handle: FileSystemDirectoryHandle, pathPrefix: string) {
+                if (controller.signal.aborted) return;
+
+                for await (const entry of handle.values()) {
+                    if (controller.signal.aborted) return;
+
+                    const relativePath = pathPrefix ? `${pathPrefix}/${entry.name}` : entry.name;
+
+                    if (entry.kind === 'file') {
+                        const fileHandle = entry as FileSystemFileHandle;
+                        // Filter for images with extended format support (Added .dng)
+                        if (/\.(jpg|jpeg|png|webp|avif|dng)$/i.test(entry.name)) {
+                            // 使用 randomUUID 确保唯一性，避免 React Key 冲突
+                            const uniqueId = `file-${crypto.randomUUID()}`;
+                            entries.push({
+                                id: uniqueId,
+                                handle: fileHandle,
+                                name: entry.name,
+                                path: relativePath
+                            });
+                        } else {
+                            skippedCount++;
+                        }
+                    } else if (entry.kind === 'directory') {
+                        await scanDirectory(entry as FileSystemDirectoryHandle, relativePath);
+                    }
+                }
+            }
+
+            await scanDirectory(dirHandle, "");
+            if (skippedCount > 0) {
+                logger.warn(`Skipped ${skippedCount} non-image or RAW files. Currently only JPG, PNG, WEBP, and DNG are supported.`);
+            }
+
+            if (controller.signal.aborted) return;
+
+            logger.success(`Scanned directory`, { count: entries.length });
+            setFiles(entries);
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            if ((err as any)?.name !== 'AbortError' && !controller.signal.aborted) {
+                setError(errorMessage || 'Failed to load directory');
+                logger.error(`Directory scan failed`, { error: errorMessage });
+            } else {
+                logger.info('Directory scan aborted');
+            }
+        } finally {
+            // Only turn off loading if we haven't already cancelled (which does it immediately)
+            if (!controller.signal.aborted) {
+                setIsLoading(false);
+                setAbortController(null);
+            }
+        }
+    }, []);
+
+    const loadFiles = useCallback(async (fileList: File[]) => {
+        logger.info('Processing dropped files...', { count: fileList.length });
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            const originalCount = fileList.length;
+            const validFiles = fileList.filter(f => /\.(jpg|jpeg|png|webp|avif|dng)$/i.test(f.name));
+            const skipped = originalCount - validFiles.length;
+
+            const entries: FileEntry[] = validFiles.map(f => ({
+                // 修复：使用 randomUUID 防止批量拖入时 ID 重复 (Date.now() 在循环中可能相同)
+                id: `drop-${crypto.randomUUID()}`,
+                file: f,
+                name: f.name,
+                path: f.name
+            }));
+
+            if (skipped > 0) {
+                logger.warn(`Skipped ${skipped} files. Only JPG, PNG, WEBP, and DNG are currently supported.`);
+            }
+
+            if (entries.length === 0) {
+                throw new Error("No supported image files found. Please use JPG, PNG, WEBP, or DNG.");
+            }
+
+            logger.success(`Processed dropped files`, { count: entries.length });
+            setFiles(entries); // Replace files
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            setError(errorMessage || 'Failed to process files');
+            logger.error(`File drop failed`, { error: errorMessage });
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    const supportsFileSystemAccess = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+    return { loadDirectory, loadFiles, cancelLoad, isLoading, files, error, supportsFileSystemAccess };
 }
 </file>
 
@@ -2613,145 +2958,6 @@ export function useAIPipeline() {
 }
 </file>
 
-<file path="src/hooks/useDirectoryLoader.ts">
-import { useState, useCallback } from 'react';
-import { logger } from '@/lib/logger';
-
-export interface FileEntry {
-    id: string; // absolute path or unique identifier
-    handle?: FileSystemFileHandle;
-    file?: File;
-    name: string;
-    path: string; // relative path within the imported directory
-}
-
-export function useDirectoryLoader() {
-    const [isLoading, setIsLoading] = useState(false);
-    const [files, setFiles] = useState<FileEntry[]>([]);
-    const [error, setError] = useState<string | null>(null);
-
-    const [abortController, setAbortController] = useState<AbortController | null>(null);
-
-    const cancelLoad = useCallback(() => {
-        if (abortController) {
-            abortController.abort();
-            setAbortController(null);
-            setIsLoading(false);
-            logger.info('Operation cancelled by user');
-        }
-    }, [abortController]);
-
-    const loadDirectory = useCallback(async () => {
-        const controller = new AbortController();
-        setAbortController(controller);
-
-        logger.info('Opening directory picker...');
-        setIsLoading(true);
-        setError(null);
-        try {
-            const dirHandle = await window.showDirectoryPicker();
-            if (controller.signal.aborted) return;
-
-            const entries: FileEntry[] = [];
-            let skippedCount = 0;
-            async function scanDirectory(handle: FileSystemDirectoryHandle, pathPrefix: string) {
-                if (controller.signal.aborted) return;
-
-                for await (const entry of handle.values()) {
-                    if (controller.signal.aborted) return;
-
-                    const relativePath = pathPrefix ? `${pathPrefix}/${entry.name}` : entry.name;
-
-                    if (entry.kind === 'file') {
-                        const fileHandle = entry as FileSystemFileHandle;
-                        // Filter for images with extended format support (Added .dng)
-                        if (/\.(jpg|jpeg|png|webp|avif|dng)$/i.test(entry.name)) {
-                            // 使用 randomUUID 确保唯一性，避免 React Key 冲突
-                            const uniqueId = `file-${crypto.randomUUID()}`;
-                            entries.push({
-                                id: uniqueId,
-                                handle: fileHandle,
-                                name: entry.name,
-                                path: relativePath
-                            });
-                        } else {
-                            skippedCount++;
-                        }
-                    } else if (entry.kind === 'directory') {
-                        await scanDirectory(entry as FileSystemDirectoryHandle, relativePath);
-                    }
-                }
-            }
-
-            await scanDirectory(dirHandle, "");
-            if (skippedCount > 0) {
-                logger.warn(`Skipped ${skippedCount} non-image or RAW files. Currently only JPG, PNG, WEBP, and DNG are supported.`);
-            }
-
-            if (controller.signal.aborted) return;
-
-            logger.success(`Scanned directory`, { count: entries.length });
-            setFiles(entries);
-        } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : String(err);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            if ((err as any)?.name !== 'AbortError' && !controller.signal.aborted) {
-                setError(errorMessage || 'Failed to load directory');
-                logger.error(`Directory scan failed`, { error: errorMessage });
-            } else {
-                logger.info('Directory scan aborted');
-            }
-        } finally {
-            // Only turn off loading if we haven't already cancelled (which does it immediately)
-            if (!controller.signal.aborted) {
-                setIsLoading(false);
-                setAbortController(null);
-            }
-        }
-    }, []);
-
-    const loadFiles = useCallback(async (fileList: File[]) => {
-        logger.info('Processing dropped files...', { count: fileList.length });
-        setIsLoading(true);
-        setError(null);
-
-        try {
-            const originalCount = fileList.length;
-            const validFiles = fileList.filter(f => /\.(jpg|jpeg|png|webp|avif|dng)$/i.test(f.name));
-            const skipped = originalCount - validFiles.length;
-
-            const entries: FileEntry[] = validFiles.map(f => ({
-                // 修复：使用 randomUUID 防止批量拖入时 ID 重复 (Date.now() 在循环中可能相同)
-                id: `drop-${crypto.randomUUID()}`,
-                file: f,
-                name: f.name,
-                path: f.name
-            }));
-
-            if (skipped > 0) {
-                logger.warn(`Skipped ${skipped} files. Only JPG, PNG, WEBP, and DNG are currently supported.`);
-            }
-
-            if (entries.length === 0) {
-                throw new Error("No supported image files found. Please use JPG, PNG, WEBP, or DNG.");
-            }
-
-            logger.success(`Processed dropped files`, { count: entries.length });
-            setFiles(entries); // Replace files
-        } catch (err: unknown) {
-            const errorMessage = err instanceof Error ? err.message : String(err);
-            setError(errorMessage || 'Failed to process files');
-            logger.error(`File drop failed`, { error: errorMessage });
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
-
-    const supportsFileSystemAccess = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
-    return { loadDirectory, loadFiles, cancelLoad, isLoading, files, error, supportsFileSystemAccess };
-}
-</file>
-
 <file path="src/lib/gemini.ts">
 import { GoogleGenerativeAI, SchemaType, Part } from "@google/generative-ai";
 import { logger } from "./logger";
@@ -2760,7 +2966,7 @@ const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 let genAI: GoogleGenerativeAI | null = null;
 
-function getGenAI() {
+export function getGenAI() {
     if (!genAI) {
         if (!API_KEY) throw new Error("VITE_GEMINI_API_KEY is not defined in your environment variables (.env file).");
         genAI = new GoogleGenerativeAI(API_KEY);
@@ -2807,7 +3013,6 @@ const batchSchema = {
 const MODELS = [
     "gemini-3-flash-preview",
     "gemini-2.0-flash",
-    "gemini-1.5-pro",
 ];
 
 async function tryGenerate(modelName: string, items: { id: string, data: string, mimeType: string }[], signal?: AbortSignal) {
@@ -2910,16 +3115,6 @@ async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?
     throw new Error(`AI Batch Analysis Failed: ${lastError?.message || "Unknown"}`);
 }
 
-function base64ToBlob(base64: string, mimeType: string): Blob {
-    const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: mimeType });
-}
-
 export function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -2933,15 +3128,29 @@ export function blobToBase64(blob: Blob): Promise<string> {
     });
 }
 
+// ...
 
+export function base64ToBlob(base64: string, mimeType: string): Blob {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+}
+
+// ...
 
 // --- 核心修改：支持 configOverrides ---
-async function generateImageInternal(
+// Exported for Workflow files
+export async function generateImageInternal(
     modelName: string,
     inputs: (string | Blob)[],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     configOverrides?: any
 ): Promise<Blob> {
+    // ... impl
     // Fix: Filter out thinkingConfig for image models that don't support it (like gemini-3-pro-image-preview)
     // The API returns 400 Bad Request if thinkingLevel is passed to an unsupported model.
     const isImageModel = modelName.includes('image');
@@ -2992,67 +3201,17 @@ async function generateImageInternal(
     }
 }
 
-// === 新增：背景评价结构 ===
-const critiqueSchema = {
-    type: SchemaType.OBJECT,
-    properties: {
-        critique: {
-            type: SchemaType.STRING,
-            description: "Critique the image's lighting, composition, and clutter. Be harsh like a pro photographer.",
-            nullable: false,
-        },
-        fixPrompt: {
-            type: SchemaType.STRING,
-            description: "A generative AI prompt to FIX these issues. E.g., 'Add warm Christmas lights, remove the messy table, brighten the room'.",
-            nullable: false,
-        },
-    },
-    required: ["critique", "fixPrompt"],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-} as any;
+// ...
 
-/**
- * 步骤 4.1: 让 AI 思考背景有什么问题 (对应截图里的 "评价一下...有 feedback")
- */
-export async function generateBackgroundFixPrompt(bgBlob: Blob): Promise<{ critique: string, fixPrompt: string }> {
-    const model = getGenAI().getGenerativeModel({
-        model: "gemini-2.0-flash", // 使用 Flash 进行快速文本推理
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: critiqueSchema
-        }
-    });
-
-    const b64 = await blobToBase64(bgBlob);
-    const prompt = `
-    Act as a professional interior photographer. 
-    Analyze this background image (which has no subject currently).
-    1. Identify issues: Lighting (too dark?), Clutter (messy items?), Composition (unbalanced?).
-    2. Provide a specific prompt to transform this into a "Masterpiece" background while keeping the general room structure.
-    
-    Target Vibe: Warm, High-end, Cinematic, Clean.
-    `;
-
-    const result = await model.generateContent([
-        prompt,
-        { inlineData: { data: b64, mimeType: "image/jpeg" } }
-    ]);
-
-    return JSON.parse(result.response.text());
-}
-
-/**
- * 步骤 2: 提取人像 (Image A)
- */
 // 统一使用的图像生成模型
-const IMAGE_MODEL = "gemini-3-pro-image-preview";
+export const IMAGE_MODEL = "gemini-3-pro-image-preview";
 
 /**
  * 步骤 0: 光影侦探
  * 分析原图的主体光照方向、硬度（直射/漫射）和色温
  */
 export async function analyzeLightingCondition(originalBlob: Blob): Promise<string> {
-    const model = getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" }); // 用 Flash 够快
+    const model = getGenAI().getGenerativeModel({ model: "gemini-3-flash-preview" }); // 用 Flash 够快
     const b64 = await blobToBase64(originalBlob);
 
     const prompt = `
@@ -3069,65 +3228,6 @@ export async function analyzeLightingCondition(originalBlob: Blob): Promise<stri
     return result.response.text();
 }
 
-// ... (之前的 imports 和 常量保持不变)
-
-
-/**
- * 步骤 A (Loop): 风景评委 (使用 Flash 极速推理)
- * 返回：分数 + 下一步的修改指令
- */
-export async function evaluateLandscape(blob: Blob): Promise<{ score: number, critique: string, improvementPrompt: string }> {
-    const critiqueSchema = {
-        type: SchemaType.OBJECT,
-        properties: {
-            score: { type: SchemaType.NUMBER, description: "Aesthetic score 1-10" },
-            critique: { type: SchemaType.STRING, description: "Short critique of flaws" },
-            improvementPrompt: { type: SchemaType.STRING, description: "Specific instructions for the AI image generator to fix these flaws and reach 10/10." }
-        },
-        required: ["score", "critique", "improvementPrompt"],
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
-
-    const model = getGenAI().getGenerativeModel({
-        model: "gemini-2.0-flash", // Flash 速度快，适合循环中多次调用
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: critiqueSchema
-        }
-    });
-
-    const b64 = await blobToBase64(blob);
-    const prompt = `
-    Act as a strict National Geographic Photo Editor. 
-    Analyze this landscape photo.
-    1. Score it from 1.0 to 10.0 based on technical quality, lighting, and composition.
-    2. Identify MAJOR flaws (e.g. hazy, flat lighting, noise, bad cropping).
-    3. Write a precise "improvementPrompt" that I can send to an AI Image Enhancer to fix these specific issues.
-    `;
-
-    const result = await model.generateContent([prompt, { inlineData: { data: b64, mimeType: "image/jpeg" } }]);
-    return JSON.parse(result.response.text());
-}
-
-/**
- * 步骤 B (Loop): 针对性精修 (使用 Image Pro)
- */
-export async function optimizeLandscape(blob: Blob, instruction: string): Promise<Blob> {
-    const prompt = `
-    Act as a Professional Retoucher.
-    Task: Improve this image based on the specific feedback.
-    
-    Feedback/Instruction: "${instruction}"
-    
-    Constraints:
-    - Maintain photorealism.
-    - Improve Dynamic Range (HDR style) and Clarity.
-    - Keep the original scene structure, do not hallucinate new objects.
-    - Target: High-End Fine Art Landscape.
-    `;
-
-    return await generateImageInternal(IMAGE_MODEL, [prompt, blob]);
-}
 
 /**
  * 步骤 2: 提取人像 (Image A)
@@ -3406,7 +3506,7 @@ function App() {
       }));
 
       db.transaction('rw', db.photos, async () => {
-        await db.photos.clear(); // Clear old for new import? Or append? Usually clear for this type of app.
+        // await db.photos.clear(); // Removed to preserve existing photos
         await db.photos.bulkPut(newPhotos);
       });
     }
@@ -3608,16 +3708,7 @@ function App() {
               </button>
             </div>
 
-            <input
-              id="target-file-input"
-              type="file"
-              multiple
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files) loadFiles(Array.from(e.target.files));
-              }}
-            />
+
           </div>
         ) : (
           // Grid
@@ -3645,6 +3736,22 @@ function App() {
           onRetry={handleRetryErrors}
         />
       )}
+
+      {/* Hidden File Input for "Add Photos" (Must be always present) */}
+      <input
+        id="target-file-input"
+        type="file"
+        multiple
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) {
+            loadFiles(Array.from(e.target.files));
+            // Reset value to allow selecting same files again if needed
+            e.target.value = '';
+          }
+        }}
+      />
     </div>
   );
 }
