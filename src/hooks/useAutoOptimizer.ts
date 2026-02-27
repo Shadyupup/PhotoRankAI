@@ -8,82 +8,119 @@ import { runPortraitWorkflow } from '@/lib/portrait-workflow';
 import { runLandscapeWorkflow } from '@/lib/landscape-workflow';
 import { logger } from '@/lib/logger';
 import { toast } from 'sonner';
+import { LOCAL_SCORER_URL } from '@/lib/local-scorer';
 
 export function useAutoOptimizer() {
     const [isOptimizing, setIsOptimizing] = useState(false);
 
-    const startOptimization = async (photo: PhotoMetadata) => {
+    // Accept mode parameter (instant | iterative)
+    const startOptimization = async (photo: PhotoMetadata, mode: 'instant' | 'iterative' = 'instant') => {
         if (isOptimizing) return;
         setIsOptimizing(true);
-        const toastId = toast.loading("AI 极简精修中...");
+        const modeLabels = { instant: "AI quick enhance...", iterative: "Starting iterative refinement..." };
+        const toastId = toast.loading(modeLabels[mode]);
 
         try {
             // ============================================================
-            // 1. 【核心修复】准备双轨数据：必须分离“分析用图”和“生成用图”
+            // 1. Prepare dual-track data: separate analysis image from generation image
             // ============================================================
 
-            // A. 获取高清原图 (High Res) - 用于最终生成，拒绝马赛克！
+            // A. Get high-res original - used for final generation
             let highResBlob: Blob | undefined;
-
-            if (photo.file) {
-                highResBlob = new Blob([photo.file], { type: photo.file.type });
-            } else if (photo.handle) {
+            // DB stores ArrayBuffer; convert to Blob for API usage
+            if (photo.handle) {
                 try {
                     highResBlob = await photo.handle.getFile();
                 } catch (e) {
                     console.warn("Lost file handle access", e);
                 }
-            } else if (photo.originalBlob) {
-                highResBlob = photo.originalBlob;
             }
 
-            // 如果找不到高清图，抛出错误，绝对不用缩略图凑合
+            // Electron: read file directly from disk via IPC (bypasses CORS)
+            if (!highResBlob && photo.filePath) {
+                if (window.electronAPI) {
+                    try {
+                        console.log(`[AutoOptimizer] Reading high-res via Electron IPC: ${photo.filePath}`);
+                        const result = await window.electronAPI.readFile(photo.filePath);
+                        if (result.success) {
+                            highResBlob = new Blob([new Uint8Array(result.data).buffer], { type: 'image/jpeg' });
+                            console.log(`[AutoOptimizer] Got high-res blob via IPC: ${highResBlob.size} bytes`);
+                        }
+                    } catch (e) {
+                        console.warn("[AutoOptimizer] IPC readFile failed", e);
+                    }
+                } else {
+                    // Browser fallback: use backend preview API
+                    try {
+                        const response = await fetch(`${LOCAL_SCORER_URL}/api/preview?path=${encodeURIComponent(photo.filePath)}`);
+                        if (response.ok) {
+                            highResBlob = await response.blob();
+                        }
+                    } catch (e) {
+                        console.warn("[AutoOptimizer] Backend preview fetch failed", e);
+                    }
+                }
+            }
+
+            if (!highResBlob && photo.originalBlob) {
+                highResBlob = new Blob([photo.originalBlob], { type: 'image/jpeg' });
+            }
+
+            // If no high-res image found, throw error - never use thumbnails
             if (!highResBlob) {
-                throw new Error("无法获取高清原图，为了画质，请确保原始文件可访问。");
+                throw new Error("Cannot access the original high-res image. Please ensure the source file is accessible.");
             }
 
-            // 备份原图
+            // Backup original (convert Blob to ArrayBuffer for DB)
             if (!photo.originalBlob) {
-                await db.photos.update(photo.id, { originalBlob: highResBlob });
+                const origBuf = await highResBlob.arrayBuffer();
+                await db.photos.update(photo.id, { originalBlob: origBuf });
             }
 
-            // B. 获取低清分析图 (Low Res) - 仅用于分析，提升速度
-            const lowResBlob = photo.analysisBlob || highResBlob;
+            // B. Get low-res analysis image - used only for analysis, improves speed
+            let lowResBlob: Blob;
+            if (photo.analysisBlob) {
+                lowResBlob = new Blob([photo.analysisBlob], { type: 'image/jpeg' });
+            } else {
+                lowResBlob = highResBlob;
+            }
 
             // ============================================================
 
-            // Step 0: 侦测光影 (用低清图快)
-            toast.loading("Step 0: 侦测光影 DNA...", { id: toastId });
+            // Step 0: Detect lighting conditions (using low-res for speed)
+            toast.loading("Step 0: Analyzing lighting...", { id: toastId });
             const lightingInfo = await analyzeLightingCondition(lowResBlob);
-            logger.info(`光影分析: ${lightingInfo}`);
+            logger.info(`Lighting analysis: ${lightingInfo}`);
 
-            // Step 1: 分析内容 (用低清图快)
-            toast.loading("Step 1: 分析画面内容...", { id: toastId });
+            // Step 1: Analyze content (using low-res for speed)
+            toast.loading("Step 1: Analyzing content...", { id: toastId });
             const contentInfo = await detectImageContent(lowResBlob);
 
             let finalResultBlob = highResBlob;
             let currentReason = "Optimization complete";
             let currentScore = 0;
 
-            // 分发逻辑：同时传入 lowRes 和 highRes
+            // Dispatch: pass both lowRes and highRes
             if (contentInfo.hasLivingBeings && contentInfo.subjectType === 'person') {
-                // 人像模式 (假设你之前已经改好了支持双参数)
-                const res = await runPortraitWorkflow(lowResBlob, highResBlob, toastId);
+                // Portrait mode
+                const res = await runPortraitWorkflow(lowResBlob, highResBlob, mode, toastId);
                 finalResultBlob = res.blob;
                 currentScore = res.score;
                 currentReason = res.reason;
             } else {
-                // 【重点】风景模式：传入两个 Blob
-                const res = await runLandscapeWorkflow(lowResBlob, highResBlob, toastId);
+                // Landscape mode: pass both blobs
+                // Pass mode
+                const res = await runLandscapeWorkflow(lowResBlob, highResBlob, mode, toastId);
                 finalResultBlob = res.blob;
                 currentScore = res.score;
                 currentReason = res.reason;
             }
 
-            // 保存结果
+            // Save result (convert Blob to ArrayBuffer for DB)
+            const resultBuf = await finalResultBlob.arrayBuffer();
             await db.photos.update(photo.id, {
-                analysisBlob: finalResultBlob,
-                previewBlob: finalResultBlob, // 更新预览图
+                analysisBlob: resultBuf,
+                previewBlob: resultBuf, // Update preview
                 score: currentScore,
                 originalScore: photo.originalScore ?? photo.score,
                 reason: currentReason,
@@ -96,7 +133,7 @@ export function useAutoOptimizer() {
 
         } catch (error) {
             console.error(error);
-            toast.error("处理失败: " + (error instanceof Error ? error.message : "未知错误"), { id: toastId });
+            toast.error("Enhancement failed: " + (error instanceof Error ? error.message : "Unknown error"), { id: toastId });
         } finally {
             setIsOptimizing(false);
         }

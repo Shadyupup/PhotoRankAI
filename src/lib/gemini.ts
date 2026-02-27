@@ -1,158 +1,37 @@
-import { GoogleGenerativeAI, SchemaType, Part } from "@google/generative-ai";
+import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import { logger } from "./logger";
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+// API key priority: 1. localStorage (user-provided via Settings UI) → 2. .env file
+function getApiKey(): string {
+    const stored = localStorage.getItem('photorank_gemini_api_key');
+    if (stored) return stored;
+    return import.meta.env.VITE_GEMINI_API_KEY || '';
+}
 
 let genAI: GoogleGenerativeAI | null = null;
+let lastKey = '';
 
 export function getGenAI() {
-    if (!genAI) {
-        if (!API_KEY) throw new Error("VITE_GEMINI_API_KEY is not defined in your environment variables (.env file).");
-        genAI = new GoogleGenerativeAI(API_KEY);
+    const key = getApiKey();
+    if (!key) throw new Error("Gemini API Key is not set. Go to Settings (⚙️) to enter your key.");
+    // Re-initialize if key changed (e.g. user updated it in Settings)
+    if (!genAI || key !== lastKey) {
+        genAI = new GoogleGenerativeAI(key);
+        lastKey = key;
     }
     return genAI;
 }
 
-const resultSchema = {
-    type: SchemaType.OBJECT,
-    properties: {
-        file_id: {
-            type: SchemaType.STRING,
-            description: "The unique ID of the photo as provided in the prompt",
-            nullable: false,
-        },
-        score: {
-            type: SchemaType.NUMBER,
-            description: "Aesthetic score from 1.0 to 10.0",
-            nullable: false,
-        },
-        reason: {
-            type: SchemaType.STRING,
-            description: "Concise reason for the score (max 15 words). Focus on composition, lighting, and sharpness.",
-            nullable: false,
-        },
-    },
-    required: ["file_id", "score", "reason"],
-};
-
-const batchSchema = {
-    description: "A list of aesthetic scores and reasons for multiple photos",
-    type: SchemaType.OBJECT,
-    properties: {
-        results: {
-            type: SchemaType.ARRAY,
-            items: resultSchema,
-            description: "Scores and reasons for each photo, including their IDs"
-        }
-    },
-    required: ["results"],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-} as any;
-
-const MODELS = [
-    "gemini-3-flash-preview",
-    "gemini-2.0-flash",
-];
-
-async function tryGenerate(modelName: string, items: { id: string, data: string, mimeType: string }[], signal?: AbortSignal) {
-    if (signal?.aborted) throw new Error("Aborted before generation");
-
-    const model = getGenAI().getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: batchSchema,
-        },
+// Listen for key changes from Settings modal
+if (typeof window !== 'undefined') {
+    window.addEventListener('api-key-changed', () => {
+        genAI = null;
+        lastKey = '';
+        logger.info('Gemini API key updated, will re-initialize on next use');
     });
-
-    const promptMessages = [
-        `Analyze the aesthetic quality of these ${items.length} images.
-         If an image is a BACKGROUND (no subject), rate its composition, lighting, and texture as a standalone landscape/scene.
-         The photos correspond to the following IDs in order: ${JSON.stringify(items.map(i => i.id))}.
-         Return JSON with "results" array.`,
-        ...items.map(item => ({ inlineData: { data: item.data, mimeType: item.mimeType } }))
-    ];
-
-    logger.info(`Sending request to ${modelName} with ${items.length} images...`);
-
-    if (signal?.aborted) throw new Error("Aborted");
-
-    const start = Date.now();
-
-    const result = await Promise.race([
-        model.generateContent(promptMessages),
-        new Promise<never>((_, reject) => {
-            if (signal) {
-                signal.addEventListener("abort", () => reject(new Error("Request Aborted")));
-            }
-        })
-    ]);
-
-    logger.info(`Received response from ${modelName} in ${Date.now() - start}ms`);
-    return result;
 }
 
-export async function analyzePhotosBatch(items: { id: string, blob: Blob }[], signal?: AbortSignal): Promise<{ file_id: string; score: number; reason: string }[]> {
-    return Promise.race([
-        analyzeInternalBatch(items, signal),
-        new Promise<never>((_, reject) => {
-            const timer = setTimeout(() => reject(new Error("Global analysis timeout (60s)")), 60000);
-            if (signal) {
-                signal.addEventListener("abort", () => {
-                    clearTimeout(timer);
-                    reject(new Error("Analysis Aborted"));
-                });
-            }
-        })
-    ]);
-}
-
-async function analyzeInternalBatch(items: { id: string, blob: Blob }[], signal?: AbortSignal): Promise<{ file_id: string; score: number; reason: string }[]> {
-    if (!API_KEY) throw new Error("API Key not found");
-    if (signal?.aborted) throw new Error("Aborted");
-
-    const validItems = items.filter(i => i.blob.size > 0);
-    if (validItems.length === 0) throw new Error("No valid image data to analyze");
-
-    const images = await Promise.all(validItems.map(async item => {
-        const b64 = await blobToBase64(item.blob);
-        if (!b64) throw new Error(`Base64 conversion failed for ${item.id}`);
-        return {
-            id: item.id,
-            data: b64,
-            mimeType: item.blob.type || "image/jpeg"
-        };
-    }));
-
-    let lastError;
-
-    for (const modelName of MODELS) {
-        if (signal?.aborted) throw new Error("Aborted");
-        try {
-            const result = await tryGenerate(modelName, images, signal);
-            const text = result.response.text();
-
-            let parsed;
-            try {
-                parsed = JSON.parse(text);
-            } catch { // Ignore parse error, handle below
-                throw new Error(`Invalid JSON response`);
-            }
-
-            if (!parsed.results || !Array.isArray(parsed.results)) {
-                throw new Error("Invalid batch response structure");
-            }
-
-            return parsed.results;
-        } catch (err: unknown) {
-            const error = err instanceof Error ? err : new Error(String(err));
-            lastError = error;
-            await new Promise(r => setTimeout(r, 500));
-            continue;
-        }
-    }
-    throw new Error(`AI Batch Analysis Failed: ${lastError?.message || "Unknown"}`);
-}
+// Scoring functions moved to local-scorer.ts (uses local NIMA + CLIP models)
 
 export function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -169,6 +48,38 @@ export function blobToBase64(blob: Blob): Promise<string> {
 
 // ...
 
+export async function evaluatePhotoScore(blob: Blob): Promise<{ score: number; reason: string }> {
+    const model = getGenAI().getGenerativeModel({
+        model: "gemini-1.5-flash", // Good for fast text/vision tasks
+        generationConfig: { responseMimeType: "application/json" }
+    });
+    const prompt = `You are an expert photography judge. Evaluate this image and give it a score from 1.0 to 10.0.
+1.0 is a complete failure (blurry, pitch black, garbage).
+10.0 is an absolute masterpiece (perfect lighting, focus, composition, aesthetics).
+Pay attention to:
+- Lighting and Exposure
+- Focus and Sharpness
+- Composition and Framing
+
+Return JSON: { "score": number, "reason": "string description" }`;
+
+    try {
+        const imageBase64 = await blobToBase64(blob);
+        const result = await model.generateContent([
+            prompt,
+            { inlineData: { data: imageBase64, mimeType: blob.type || "image/jpeg" } }
+        ]);
+        const data = JSON.parse(result.response.text());
+        return {
+            score: typeof data.score === 'number' ? data.score : parseFloat(data.score) || 0,
+            reason: data.reason || "No reason provided"
+        };
+    } catch (e) {
+        logger.error("Gemini evaluatePhotoScore failed", e);
+        return { score: 0, reason: "Gemini scoring failed" };
+    }
+}
+
 export function base64ToBlob(base64: string, mimeType: string): Blob {
     const byteCharacters = atob(base64);
     const byteNumbers = new Array(byteCharacters.length);
@@ -181,7 +92,7 @@ export function base64ToBlob(base64: string, mimeType: string): Blob {
 
 // ...
 
-// --- 核心修改：支持 configOverrides ---
+// --- Core change: support configOverrides ---
 // Exported for Workflow files
 export async function generateImageInternal(
     modelName: string,
@@ -242,15 +153,15 @@ export async function generateImageInternal(
 
 // ...
 
-// 统一使用的图像生成模型
-export const IMAGE_MODEL = "gemini-3-pro-image-preview";
+// Shared image generation model
+export const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 
 /**
- * 步骤 0: 光影侦探
- * 分析原图的主体光照方向、硬度（直射/漫射）和色温
+ * Step 0: Lighting Detective
+ * Analyze subject light direction, hardness (direct/diffuse), and color temperature
  */
 export async function analyzeLightingCondition(originalBlob: Blob): Promise<string> {
-    const model = getGenAI().getGenerativeModel({ model: "gemini-3-flash-preview" }); // 用 Flash 够快
+    const model = getGenAI().getGenerativeModel({ model: "gemini-3.1-pro-preview" });
     const b64 = await blobToBase64(originalBlob);
 
     const prompt = `
@@ -269,8 +180,8 @@ export async function analyzeLightingCondition(originalBlob: Blob): Promise<stri
 
 
 /**
- * 步骤 2: 提取人像 (Image A)
- * 极简指令：只要人，背景全白/透明
+ * Step 2: Extract Portrait (Image A)
+ * Minimal instruction: keep person only, white/transparent background
  */
 export async function extractSubjectWithGemini(originalBlob: Blob): Promise<Blob> {
     const prompt = `
@@ -279,13 +190,13 @@ export async function extractSubjectWithGemini(originalBlob: Blob): Promise<Blob
     Constraint: Keep the edges sharp and precise. Do not change the person's pose or lighting.
     `;
 
-    // 这里不再传 thinking config，Image 模型通常不需要 text thinking
+    // No thinking config needed for Image model
     return await generateImageInternal(IMAGE_MODEL, [prompt, originalBlob]);
 }
 
 /**
- * 步骤 3: 移除主体 (Image B)
- * 极简指令：把人擦掉，补全背景
+ * Step 3: Remove Subject (Image B)
+ * Minimal instruction: remove person, inpaint background
  */
 export async function removeSubjectFromImage(originalBlob: Blob): Promise<Blob> {
     const prompt = `
@@ -298,10 +209,10 @@ export async function removeSubjectFromImage(originalBlob: Blob): Promise<Blob> 
 }
 
 /**
- * 步骤 4 (Pro): 基于光影分析的背景重绘
+ * Step 4 (Pro): Lighting-aware background repaint
  */
 export async function optimizeBackground(bgBlob: Blob, lightingContext: string): Promise<Blob> {
-    // 增加景深控制 (Depth of Field) 和 光影匹配
+    // Add depth of field control and lighting matching
     const prompt = `
     Task: Remaster this background to match a specific lighting context.
     
@@ -322,13 +233,13 @@ export async function optimizeBackground(bgBlob: Blob, lightingContext: string):
 }
 
 /**
- * 步骤 5 (Pro): 影楼级融合
+ * Step 5 (Pro): Studio-grade compositing
  */
 export async function mergeAndHarmonize(
     originalBlob: Blob,
     personBlob: Blob,
     backgroundBlob: Blob,
-    lightingContext: string // 传入光影信息
+    lightingContext: string // Pass lighting info
 ): Promise<Blob> {
 
     const prompt = `
@@ -356,14 +267,14 @@ export async function mergeAndHarmonize(
     return await generateImageInternal(
         IMAGE_MODEL,
         [originalBlob, personBlob, backgroundBlob, prompt]
-        // 降低一点 creativity/temperature 可能有助于保真，但 Gemini API 对图像参数控制有限
-        // 重点靠 Prompt 的 "Identity Protection Protocol"
+        // Lowering creativity/temperature may help fidelity, but Gemini API has limited image param control
+        // Relies primarily on prompt-level "Identity Protection Protocol"
     );
 }
 
-// 兼容旧接口
+// Legacy interface compatibility
 export async function editImageWithGemini(originalBlob: Blob, instruction: string): Promise<Blob> {
-    return generateImageInternal("gemini-3-pro-image-preview", [`Edit: ${instruction}`, originalBlob]);
+    return generateImageInternal(IMAGE_MODEL, [`Edit: ${instruction}`, originalBlob]);
 }
 
 export interface ContentAnalysis {
@@ -374,7 +285,7 @@ export interface ContentAnalysis {
 
 export async function detectImageContent(blob: Blob): Promise<ContentAnalysis> {
     const model = getGenAI().getGenerativeModel({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.1-pro-preview",
         generationConfig: { responseMimeType: "application/json" }
     });
     const prompt = `Analyze this image. Return JSON: { "hasLivingBeings": boolean, "subjectType": string, "description": string }`;

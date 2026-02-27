@@ -1,5 +1,6 @@
 import { SchemaType } from "@google/generative-ai";
 import { getGenAI, blobToBase64, generateImageInternal, IMAGE_MODEL } from "./gemini";
+import { analyzePhotosBatch } from "./local-scorer";
 import { logger } from "./logger";
 import { toast } from "sonner";
 
@@ -16,7 +17,7 @@ export async function evaluateLandscape(blob: Blob): Promise<{ score: number, cr
     };
 
     const model = getGenAI().getGenerativeModel({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.1-pro-preview",
         generationConfig: {
             responseMimeType: "application/json",
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,59 +56,70 @@ export async function optimizeLandscape(blob: Blob, instruction: string): Promis
     return await generateImageInternal(IMAGE_MODEL, [prompt, blob]);
 }
 
-// 3. Workflow Runner 【这里是修改重点！】
+// 3. Workflow Runner
 export async function runLandscapeWorkflow(
-    analysisBlob: Blob,   // <--- 接收低清图 (用于第一轮快速分析)
-    generationBlob: Blob, // <--- 接收高清图 (用于生成，这才是重点！)
+    analysisBlob: Blob,
+    generationBlob: Blob,
+    mode: 'instant' | 'iterative',
     toastId: string | number
 ): Promise<{ blob: Blob, score: number, reason: string }> {
-    logger.info("🏞️ Landscape Mode (Iterative Loop - High Res)");
+    logger.info(`🏞️ Landscape Mode: ${mode.toUpperCase()}`);
 
-    // 【关键】：初始化循环用的 Blob 为高清图！
     let loopBlob = generationBlob;
-
     let loopScore = 0;
     let loopReason = "Initial Capture";
     let iteration = 0;
-    const MAX_LOOPS = 3;
-    const TARGET_SCORE_LANDSCAPE = 8.0;
+
+    // Core control: if instant, max loops = 1
+    const MAX_LOOPS = mode === 'instant' ? 1 : 3;
+    const TARGET_SCORE_LANDSCAPE = 9.0; // Pro mode requires higher score
 
     while (iteration < MAX_LOOPS) {
         iteration++;
-        toast.loading(`Round ${iteration}: AI Critic & Plan...`, { id: toastId });
 
-        // 1. Evaluate (评分)
-        // 技巧：第一轮为了快，可以用 analysisBlob (低清) 去评分。
-        // 但从第二轮开始，因为图已经修过了，必须评测修过后的 loopBlob (虽然它很大，但必须评测它才能知道修得怎么样)。
+        // UI toast differentiation
+        if (mode === 'instant') {
+            toast.loading("Rendering single-pass National Geographic quality...", { id: toastId });
+        } else {
+            toast.loading(`Round ${iteration}/${MAX_LOOPS}: AI review and iteration...`, { id: toastId });
+        }
+
+        // 1. Evaluate
         const blobToEvaluate = (iteration === 1 && analysisBlob) ? analysisBlob : loopBlob;
-
         const evalResult = await evaluateLandscape(blobToEvaluate);
+
         loopScore = evalResult.score;
         loopReason = evalResult.critique;
 
         logger.info(`[Loop ${iteration}] Score: ${loopScore}, Fix: ${evalResult.improvementPrompt}`);
 
-        if (loopScore >= TARGET_SCORE_LANDSCAPE) {
-            toast.success(`Target Met! Score: ${loopScore}`, { id: toastId });
+        // If score is sufficient, exit early (iterative only, instant must run once)
+        if (mode === 'iterative' && loopScore >= TARGET_SCORE_LANDSCAPE) {
+            toast.success(`Target met! Score: ${loopScore}`, { id: toastId });
             break;
         }
+
+        // 2. Optimize
+        // Key: passing highRes loopBlob so output is also high-res
+        toast.loading(`Round ${iteration}: Fixing: ${evalResult.critique.slice(0, 20)}...`, { id: toastId });
+        try {
+            loopBlob = await optimizeLandscape(loopBlob, evalResult.improvementPrompt);
+        } catch (e) {
+            logger.error("Generation failed", e);
+            break;
+        }
+
+        // Instant mode: break after one round
+        if (mode === 'instant') break;
+
+        // If iterative mode and max loops reached, but target not met
         if (iteration === MAX_LOOPS) {
             toast("Max loops reached", { id: toastId });
             break;
         }
-
-        // 2. Optimize (精修)
-        toast.loading(`Round ${iteration}: Fixing: ${evalResult.critique.slice(0, 20)}...`, { id: toastId });
-        try {
-            // 【关键】：这里传入的是 loopBlob (高清图)，所以生成出来的也会是高清图
-            loopBlob = await optimizeLandscape(loopBlob, evalResult.improvementPrompt);
-        } catch (e) {
-            logger.error("Landscape generation failed", e);
-            break;
-        }
     }
 
-    const currentReason = `[Loop x${iteration}] ${loopReason}`;
-
-    return { blob: loopBlob, score: loopScore, reason: currentReason };
+    // Final scoring via local scorer (normalized 0-100, consistent with portrait workflow)
+    const finalRes = await analyzePhotosBatch([{ id: 'final', blob: loopBlob }], 'local-fast');
+    return { blob: loopBlob, score: finalRes[0].score, reason: loopReason };
 }

@@ -9,19 +9,25 @@ self.onmessage = async (e: MessageEvent) => {
         console.log(`[Worker] Processing ${id}: Start Compression...`);
 
         // 1. Generate Thumbnail (300px)
-        const thumbBlob = await resizeImage(bitmap, 300);
+        const thumbBuf = await resizeImageToArrayBuffer(bitmap, 300);
 
         // 2. Generate Analysis (512px) - Optimized for Token Usage
-        const analysisBlob = await resizeImage(bitmap, 512);
+        const analysisBuf = await resizeImageToArrayBuffer(bitmap, 512);
 
-        console.log(`[Worker] Processing ${id}: Compression Complete. Thumb=${thumbBlob?.size}, Analysis=${analysisBlob?.size}`);
+        console.log(`[Worker] Processing ${id}: Compression Complete. Thumb=${thumbBuf?.byteLength}, Analysis=${analysisBuf?.byteLength}`);
+
+        // Transfer ArrayBuffers (zero-copy) instead of Blobs
+        // WebKit in Tauri cannot store Blobs in IndexedDB
+        const transferables: ArrayBuffer[] = [];
+        if (thumbBuf) transferables.push(thumbBuf);
+        if (analysisBuf) transferables.push(analysisBuf);
 
         self.postMessage({
             id,
             status: 'success',
-            thumbBlob,
-            analysisBlob
-        });
+            thumbBuf,
+            analysisBuf
+        }, transferables);
 
         bitmap.close();
     } catch (err: unknown) {
@@ -30,11 +36,8 @@ self.onmessage = async (e: MessageEvent) => {
     }
 };
 
-async function resizeImage(bitmap: ImageBitmap, targetSize: number): Promise<Blob | null> {
+async function resizeImageToArrayBuffer(bitmap: ImageBitmap, targetSize: number): Promise<ArrayBuffer | null> {
     const scale = Math.min(targetSize / bitmap.width, targetSize / bitmap.height, 1);
-    // If no scaling needed and original is wanted, return original? 
-    // No, we always want consistent formats (e.g. jpeg/webp). 
-    // If scale is 1, we still draw it.
 
     const width = Math.round(bitmap.width * scale);
     const height = Math.round(bitmap.height * scale);
@@ -47,7 +50,8 @@ async function resizeImage(bitmap: ImageBitmap, targetSize: number): Promise<Blo
     // High quality resize
     ctx.drawImage(bitmap, 0, 0, width, height);
 
-    return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+    const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+    return blob.arrayBuffer();
 }
 
 export { };

@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface Window {
-    showDirectoryPicker(): Promise<FileSystemDirectoryHandle>;
+    showDirectoryPicker(options?: { mode?: 'read' | 'readwrite' }): Promise<FileSystemDirectoryHandle>;
 }
 
 interface FileSystemHandle {
@@ -9,14 +9,21 @@ interface FileSystemHandle {
     name: string;
 }
 
-interface FileSystemFileHandle extends FileSystemHandle {
-    kind: 'file';
-    getFile(): Promise<File>;
-}
-
 interface FileSystemDirectoryHandle extends FileSystemHandle {
     kind: 'directory';
     values(): AsyncIterableIterator<FileSystemHandle>;
+    getFileHandle(name: string, options?: { create?: boolean }): Promise<FileSystemFileHandle>;
+}
+
+interface FileSystemFileHandle extends FileSystemHandle {
+    kind: 'file';
+    getFile(): Promise<File>;
+    createWritable(): Promise<FileSystemWritableFileStream>;
+}
+
+interface FileSystemWritableFileStream extends WritableStream {
+    write(data: Blob | BufferSource | string): Promise<void>;
+    close(): Promise<void>;
 }
 
 // Drag and Drop (Webkit) API types

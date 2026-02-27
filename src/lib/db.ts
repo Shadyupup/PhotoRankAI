@@ -1,8 +1,8 @@
 import Dexie, { type Table } from 'dexie';
 
-// 定义修图参数的结构
+// Define photo editing parameters structure
 export interface EditConfig {
-    crop: { x: number; y: number; width: number; height: number }; // 百分比 0.0 - 1.0
+    crop: { x: number; y: number; width: number; height: number }; // Percentage 0.0 - 1.0
     filters: {
         brightness: number; // default 1.0
         contrast: number;   // default 1.0
@@ -23,26 +23,33 @@ export interface PhotoMetadata {
     lastModified: number;
     webkitRelativePath: string; // Keep path for folder structure
 
-    // Blob handling
-    analysisBlob?: Blob;      // 这是“当前显示的图” (可能是原图，也可能是 AI 修过的图)
-    previewBlob?: Blob;       // Tiny Thumbnail (e.g. 200px) for Grid
+    // Binary data stored as ArrayBuffer (NOT Blob — WebKit/Tauri cannot store Blobs in IndexedDB)
+    analysisBlob?: ArrayBuffer;      // Current display image (original or AI-enhanced)
+    previewBlob?: ArrayBuffer;       // Tiny Thumbnail (e.g. 200px) for Grid
 
-    // --- 新增字段 ---
-    originalBlob?: Blob;      // 这是“绝对原图备份” (用于对比)
+    // --- Additional fields ---
+    originalBlob?: ArrayBuffer;      // Absolute original backup (for comparison)
     // ----------------
 
     handle?: FileSystemFileHandle; // For zero-upload access
+    filePath?: string; // Absolute path from Electron's File.path
 
     // AI Results
     score?: number;
-    originalScore?: number;   // <--- 【新增】保存优化前的原始分数
+    originalScore?: number;   // Original score before enhancement
     reason?: string;
+    tags?: string[];          // AI-extracted semantic tags for offline RAG search
+    clip_embedding?: number[]; // Store 768-D visual feature for clustering
+    groupId?: string;          // Defines which deduplication cluster this belongs to
     status: 'new' | 'processing' | 'queued' | 'analyzing' | 'scored' | 'error' | 'done';
 
     createdAt?: number;
     updatedAt?: number;
 
-    // 新增字段：存储 AI 的修图建议
+    // Soft-delete: hide from grid & export without removing original file
+    rejected?: boolean;
+
+    // Additional field: store AI editing suggestions
     magicEdits?: EditConfig;
 }
 
@@ -60,9 +67,9 @@ export class PhotoRankDB extends Dexie {
 
     constructor() {
         super('PhotoRankDB');
-        // 升级版本号到 26，以应用 schema 变更
-        this.version(26).stores({
-            photos: 'id, status, score, createdAt',
+        // Upgrade to version 28, add name index for dedup queries on import
+        this.version(28).stores({
+            photos: 'id, status, score, name, *tags, createdAt',
             logs: '++id, timestamp, level'
         });
     }

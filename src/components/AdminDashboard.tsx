@@ -16,6 +16,9 @@ export function AdminDashboard({ onClose, onRetry }: AdminDashboardProps) {
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<string>('all');
 
+    const [showConfirmWipe, setShowConfirmWipe] = useState(false);
+    const [wipeInput, setWipeInput] = useState('');
+
     const stats = useLiveQuery(async () => {
         return {
             total: await db.photos.count(),
@@ -40,16 +43,23 @@ export function AdminDashboard({ onClose, onRetry }: AdminDashboardProps) {
         return result;
     }, [search, filter]) || [];
 
-    const handleClearAll = async () => {
-        const confirmMsg = prompt('DANGER ZONE: This will permanently delete ALL photos and logs.\n\nType "DELETE" to confirm:');
-        if (confirmMsg === 'DELETE') {
+    const handleClearAll = () => {
+        setWipeInput('');
+        setShowConfirmWipe(true);
+    };
+
+    const executeWipe = async () => {
+        if (wipeInput === 'DELETE') {
             await db.photos.clear();
             await db.logs.clear();
             logger.warn('Administrative Data Wipe performed');
             toast.success("System reset complete.");
             onClose();
-        } else if (confirmMsg !== null) {
-            toast.error("Deletion cancelled. Verification failed.");
+            // Force a page reload to clear out any in-memory FileHandles and React state locks
+            window.location.reload();
+        } else {
+            toast.error("Deletion cancelled. Type 'DELETE' exactly.");
+            setShowConfirmWipe(false);
         }
     };
 
@@ -202,6 +212,50 @@ export function AdminDashboard({ onClose, onRetry }: AdminDashboardProps) {
                     </table>
                 </div>
             </div>
+
+            {/* Wipe Confirmation Modal */}
+            {showConfirmWipe && (
+                <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-[#161616] border border-red-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center gap-3 text-red-500 pb-2 border-b border-[#262626]">
+                            <AlertCircle size={24} />
+                            <h3 className="text-lg font-bold">DANGER ZONE</h3>
+                        </div>
+                        <p className="text-gray-300 text-sm leading-relaxed">
+                            This will permanently delete <strong>ALL</strong> photos and logs from the local database. This action cannot be undone.
+                        </p>
+                        <div className="space-y-2 pt-2">
+                            <label className="text-xs font-semibold text-gray-500 tracking-wider">TYPE "DELETE" TO CONFIRM</label>
+                            <input
+                                autoFocus
+                                value={wipeInput}
+                                onChange={e => setWipeInput(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') executeWipe();
+                                    if (e.key === 'Escape') setShowConfirmWipe(false);
+                                }}
+                                className="w-full bg-[#0A0A0A] border border-[#333] focus:border-red-500 rounded-xl px-4 py-3 font-mono text-center tracking-widest outline-none transition-colors"
+                                placeholder="DELETE"
+                            />
+                        </div>
+                        <div className="flex gap-3 pt-4">
+                            <button
+                                onClick={() => setShowConfirmWipe(false)}
+                                className="flex-1 px-4 py-2.5 bg-[#262626] hover:bg-[#333] rounded-xl text-sm font-semibold transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={executeWipe}
+                                disabled={wipeInput !== 'DELETE'}
+                                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:hover:bg-red-600 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                            >
+                                <Trash2 size={16} /> Wipe DB
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

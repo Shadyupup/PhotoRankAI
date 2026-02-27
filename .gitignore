@@ -22,3 +22,24 @@ tsconfig.tsbuildinfo
 # OS files
 .DS_Store
 Thumbs.db
+
+# Backend build artifacts
+backend/build/
+backend/dist/
+backend/.pytest_cache/
+backend/__pycache__/
+
+# Tauri
+src-tauri/target/
+src-tauri/bin/
+
+# Test data
+test_images/
+
+# Electron release
+release/
+
+# Misc
+.check
+.checker
+repomix-output.xml

@@ -8,9 +8,10 @@ interface PhotoGridProps {
     selectedIds: Set<string>;
     onToggleSelect: (id: string) => void;
     onView: (photo: PhotoMetadata) => void;
+    onReject: (id: string) => void;
 }
 
-export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView }: PhotoGridProps) {
+export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView, onReject }: PhotoGridProps) {
     useEffect(() => {
         const scoredCount = photos.filter(p => p.status === 'scored').length;
         console.log(`[UI] PhotoGrid Rendered. Total=${photos.length}, Scored=${scoredCount}`);
@@ -30,7 +31,7 @@ export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView }: Photo
                 style={{ height: '100%' }}
                 totalCount={photos.length}
                 data={photos}
-                computeItemKey={(index, item) => item.id}
+                computeItemKey={(_, item) => item.id}
                 components={{
                     List: forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ style, children, ...props }, ref) => (
                         <div
@@ -54,6 +55,7 @@ export function PhotoGrid({ photos, selectedIds, onToggleSelect, onView }: Photo
                         selected={selectedIds.has(photo.id)}
                         onToggleSelect={onToggleSelect}
                         onView={onView}
+                        onReject={onReject}
                     />
                 )}
             />

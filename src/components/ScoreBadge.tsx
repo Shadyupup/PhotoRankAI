@@ -55,13 +55,13 @@ export function ScoreBadge({ score, status, className }: ScoreBadgeProps) {
     let colorClass = "";
     let glowClass = "";
 
-    if (score >= 9.0) {
+    if (score >= 90) {
         colorClass = "text-[#4ADE80] border-[#4ADE80]/30 bg-[#4ADE80]/10";
         glowClass = "shadow-[0_0_10px_rgba(74,222,128,0.2)]";
-    } else if (score >= 7.0) {
+    } else if (score >= 70) {
         colorClass = "text-[#60A5FA] border-[#60A5FA]/30 bg-[#60A5FA]/10";
         glowClass = "shadow-[0_0_10px_rgba(96,165,250,0.2)]";
-    } else if (score >= 5.0) {
+    } else if (score >= 50) {
         colorClass = "text-[#FB923C] border-[#FB923C]/30 bg-[#FB923C]/10";
         glowClass = "shadow-[0_0_10px_rgba(251,146,60,0.2)]";
     } else {
@@ -80,7 +80,7 @@ export function ScoreBadge({ score, status, className }: ScoreBadgeProps) {
                 className
             )}
         >
-            <span className="text-sm font-bold tracking-wide">{score.toFixed(1)}</span>
+            <span className="text-sm font-bold tracking-wide">{score.toFixed(0)}</span>
         </motion.div>
     );
 }

@@ -1,12 +1,13 @@
 import { SchemaType } from "@google/generative-ai";
-import { getGenAI, blobToBase64, generateImageInternal, analyzePhotosBatch } from "./gemini";
+import { getGenAI, blobToBase64, generateImageInternal, IMAGE_MODEL } from "./gemini";
+import { analyzePhotosBatch } from "./local-scorer";
 import { logger } from "./logger";
 import { toast } from "sonner";
 
 // 1. Mod Analysis
 export async function analyzePortraitForGen(originalBlob: Blob): Promise<{ description: string, suggestions: string }> {
     const model = getGenAI().getGenerativeModel({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.1-pro-preview",
         generationConfig: {
             responseMimeType: "application/json",
             responseSchema: {
@@ -46,10 +47,10 @@ export async function generatePortraitMasterpiece(
     originalBlob: Blob,
     analysis: { description: string, suggestions: string }
 ): Promise<Blob> {
-    // 【关键修改】：
-    // 1. 去掉 "Beautify" (这词会导致整容)
-    // 2. 强调 "High Fidelity" (高保真)
-    // 3. 强调 "Enhance Texture" (增强质感而不是重绘)
+    // Key changes:
+    // 1. Removed "Beautify" (causes facial distortion)
+    // 2. Emphasize "High Fidelity"
+    // 3. Emphasize "Enhance Texture" (not redraw)
 
     const finalPrompt = `
     Edit this image to create a high-end photography masterpiece.
@@ -71,49 +72,96 @@ export async function generatePortraitMasterpiece(
     `;
 
     return await generateImageInternal(
-        "gemini-3-pro-image-preview",
+        "gemini-3.1-flash-image-preview",
         [finalPrompt, originalBlob],
         {
-            // 如果 API 支持，可以加 safetySettings，但在 web sdk 里主要靠 prompt
+            // If API supports, can add safetySettings, but web SDK mainly relies on prompt
         }
     );
 }
 
+// Portrait critic (for Pro mode iterative refinement)
+async function evaluatePortrait(blob: Blob): Promise<{ critique: string, fixPrompt: string }> {
+    const model = getGenAI().getGenerativeModel({
+        model: "gemini-3.1-pro-preview",
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: SchemaType.OBJECT,
+                properties: {
+                    critique: { type: SchemaType.STRING, description: "Critique the skin texture, lighting, and eyes. Is it too smooth (plastic)? Is the lighting flat?" },
+                    fixPrompt: { type: SchemaType.STRING, description: "Instructions to fix these flaws while strictly preserving identity." }
+                },
+                required: ["critique", "fixPrompt"]
+            }
+        }
+    });
+
+    const b64 = await blobToBase64(blob);
+    const result = await model.generateContent([
+        "Act as a high-end beauty retoucher. Critique this image. Focus on finding 'AI look' flaws like plastic skin or dead eyes.",
+        { inlineData: { data: b64, mimeType: "image/jpeg" } }
+    ]);
+    return JSON.parse(result.response.text());
+}
+
+// Portrait refiner (for Pro mode, fine-tune based on previous round)
+async function refinePortrait(blob: Blob, instructions: string): Promise<Blob> {
+    const prompt = `
+    Refine this portrait based on feedback.
+    
+    Feedback to Fix: ${instructions}
+    
+    Constraints:
+    - STRICTLY PRESERVE IDENTITY. Do not change the face shape.
+    - Focus on TEXTURE and LIGHTING adjustments only.
+    - Output Photorealistic 8K.
+    `;
+    return await generateImageInternal(IMAGE_MODEL, [prompt, blob]);
+}
+
 // 3. Workflow Runner
 export async function runPortraitWorkflow(
-    analysisBlob: Blob,   // <--- 接收低清图
-    generationBlob: Blob, // <--- 接收高清图
+    analysisBlob: Blob,
+    generationBlob: Blob,
+    mode: 'instant' | 'iterative',
     toastId: string | number
 ): Promise<{ blob: Blob, score: number, reason: string }> {
-    logger.info("🚀 Portrait Mode (MasterLens Core)");
+    logger.info(`🚀 Portrait Mode: ${mode.toUpperCase()}`);
 
-    // Step 2: Analysis (使用 analysisBlob，省流量省钱)
-    toast.loading("Step 2: Analyzing Face & Light...", { id: toastId });
+    // === Phase 1: Foundation (MasterLens Core) ===
+    // Both Instant and Iterative start with MasterLens strategy
 
-    // 这里传 analysisBlob
+    toast.loading(mode === 'instant' ? "Step 1: MasterLens quick enhance..." : "Round 1: Building high-fidelity base...", { id: toastId });
+
     const analysisResult = await analyzePortraitForGen(analysisBlob);
+    let currentBlob = await generatePortraitMasterpiece(generationBlob, analysisResult);
+    let currentReason = `[Base] ${analysisResult.suggestions}`;
 
-    logger.info(`Description: ${analysisResult.description}`);
-    logger.info(`Suggestions: ${analysisResult.suggestions}`);
+    // === Phase 2: Iterative refinement (Iterative only) ===
+    if (mode === 'iterative') {
+        const MAX_LOOPS = 2; // Portrait doesn't need many rounds, 2 more is enough
 
-    // Step 3: Generation (必须使用 generationBlob，保人脸)
-    toast.loading("Step 3: Mastering Portrait...", { id: toastId });
-    let finalResultBlob: Blob;
-    let currentReason = "";
+        for (let i = 1; i <= MAX_LOOPS; i++) {
+            toast.loading(`Round ${i + 1}: AI reviewing texture and lighting...`, { id: toastId });
 
-    try {
-        // 这里传 generationBlob
-        finalResultBlob = await generatePortraitMasterpiece(generationBlob, analysisResult);
-        currentReason = `[MasterLens Edit] ${analysisResult.suggestions}`;
-    } catch (e) {
-        logger.error("Portrait Generation Failed", e);
-        throw new Error("AI Generation Service Busy");
+            // 1. Critique
+            const critique = await evaluatePortrait(currentBlob);
+            logger.info(`[Portrait Loop ${i}] Critique: ${critique.critique}`);
+
+            // 2. Fix
+            toast.loading(`Round ${i + 1}: Applying fix: ${critique.fixPrompt.slice(0, 15)}...`, { id: toastId });
+            try {
+                currentBlob = await refinePortrait(currentBlob, critique.fixPrompt);
+                currentReason = `[Pro Refined] ${critique.critique}`;
+            } catch (e) {
+                logger.error("Portrait loop failed", e);
+                break; // If failed, keep the previous round's good result
+            }
+        }
     }
 
-    // Step 4: Scoring (评分可以用生成后的图，大小无所谓，Gemini Vision 对分辨率不敏感)
-    // 这里用 finalResultBlob 没问题
-    const finalRes = await analyzePhotosBatch([{ id: 'final', blob: finalResultBlob }]); // This calls back to gemini.ts
-    const currentScore = finalRes[0].score;
-
-    return { blob: finalResultBlob, score: currentScore, reason: currentReason };
+    // Step 4: Scoring
+    const finalRes = await analyzePhotosBatch([{ id: 'final', blob: currentBlob }], 'local-fast');
+    return { blob: currentBlob, score: finalRes[0].score, reason: currentReason };
 }

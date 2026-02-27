@@ -1,19 +1,27 @@
 import { useState, useRef, useEffect } from 'react';
 import { db, resetDatabase } from '@/lib/db';
-import { analyzePhotosBatch } from '@/lib/gemini';
+import { analyzePhotosBatch, AIEngine } from '@/lib/local-scorer';
 import { logger } from '@/lib/logger';
 import { toast } from 'sonner';
 
-const BATCH_SIZE = 4;
-const RATE_LIMIT_DELAY_MS = 2000;
-const CONCURRENCY = 1; // 1 batch at a time
+// Electron uses Chromium — no WebKit memory limitations
+const BATCH_SIZE = 8;
+const RATE_LIMIT_DELAY_MS = 200;
+const CONCURRENCY = 3;
 
 let hasRecovered = false;
 
-export function useAIPipeline() {
+export function useAIPipeline(paused = false, engine: AIEngine = 'local-fast') {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const mountedRef = useRef(true);
     const lastAnalysisTimeRef = useRef<number>(0);
+    const pausedRef = useRef(paused);
+    const isRunningRef = useRef(false);
+    const engineRef = useRef<AIEngine>(engine);
+
+    // Keep refs in sync with props
+    useEffect(() => { pausedRef.current = paused; }, [paused]);
+    useEffect(() => { engineRef.current = engine; }, [engine]);
 
 
     const recoverStuckTasks = async () => {
@@ -55,11 +63,11 @@ export function useAIPipeline() {
     }, []);
 
     useEffect(() => {
-        mountedRef.current = true; // <--- 重点：重新挂载时必须设为 true
+        mountedRef.current = true;
 
         // Listen for "Wake Up" calls
         const wakeUp = () => {
-            console.log("Pipeline: 收到唤醒信号");
+            console.log("Pipeline: Received wake-up signal");
             processQueue();
         };
         window.addEventListener('pipeline-wakeup', wakeUp);
@@ -67,20 +75,25 @@ export function useAIPipeline() {
         // Start Loop
         recoverStuckTasks();
         processQueue();
+        const intervalId = setInterval(processQueue, 2000);
 
         return () => {
             mountedRef.current = false;
+            clearInterval(intervalId);
             window.removeEventListener('pipeline-wakeup', wakeUp);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+         
     }, []);
 
     const processQueue = async () => {
-        // 加一行极致详细的日志，如果没看到这行，说明逻辑没进来
-        console.log(`[Pipeline Entry] Mounted: ${mountedRef.current}`);
+        // Detailed log entry to verify pipeline is being called
+        console.log(`[Pipeline Entry] Mounted: ${mountedRef.current}, Paused: ${pausedRef.current}, Running: ${isRunningRef.current}`);
 
         if (!mountedRef.current) return;
+        if (pausedRef.current) return;
+        if (isRunningRef.current) return;
 
+        isRunningRef.current = true;
         try {
             // 1. Watchdog: Auto-cleanup zombie tasks (status='analyzing' AND updatedAt > 30s ago)
             const now = Date.now();
@@ -101,9 +114,9 @@ export function useAIPipeline() {
             const activeCount = await db.photos.where('status').equals('analyzing').count();
             const queuedCount = await db.photos.where('status').equals('queued').count();
 
-            // 只要有活儿没干完，或者正在干活，就打印状态
+            // Log status whenever there are pending or active tasks
             if (queuedCount > 0 || activeCount > 0) {
-                logger.info(`Pipeline Status: 等待中=${queuedCount}, 进行中=${activeCount}`);
+                logger.info(`Pipeline Status: queued=${queuedCount}, active=${activeCount}`);
             }
 
             if (queuedCount > 0 && activeCount < CONCURRENCY) {
@@ -132,12 +145,27 @@ export function useAIPipeline() {
 
                     // Execute logic inline (awaiting it)
                     // 1. Separate valid items from invalid ones (missing blob or size 0)
-                    const validItems: { id: string, blob: Blob }[] = [];
+                    const validItems: { id: string, blob?: Blob, path?: string }[] = [];
                     const invalidIds: string[] = [];
 
                     tasks.forEach(t => {
-                        if (t.analysisBlob && t.analysisBlob.size > 0) {
-                            validItems.push({ id: t.id, blob: t.analysisBlob });
+                        // DB stores ArrayBuffer; convert to Blob for API consumption
+                        let blobToUse: Blob | undefined;
+                        const bufToUse = t.analysisBlob || t.previewBlob || t.originalBlob;
+                        if (bufToUse && bufToUse instanceof ArrayBuffer && bufToUse.byteLength > 0) {
+                            blobToUse = new Blob([bufToUse], { type: 'image/jpeg' });
+                        } else if (bufToUse && bufToUse instanceof Blob && bufToUse.size > 0) {
+                            // Legacy fallback (data written before migration)
+                            blobToUse = bufToUse as Blob;
+                        }
+                        const absolutePath = t.filePath;
+
+                        if (blobToUse || absolutePath) {
+                            validItems.push({
+                                id: t.id,
+                                blob: blobToUse,
+                                path: absolutePath
+                            });
                         } else {
                             invalidIds.push(t.id);
                         }
@@ -145,7 +173,7 @@ export function useAIPipeline() {
 
                     // 2. Handle Invalid Items immediately (Mark as Error)
                     if (invalidIds.length > 0) {
-                        logger.error(`Pipeline: Found ${invalidIds.length} tasks with missing/empty image data. Marking as error.`);
+                        logger.error(`Pipeline: Found ${invalidIds.length} tasks with missing/empty image data: [${invalidIds.join(', ')}]. Marking as error.`);
                         await db.transaction('rw', db.photos, async () => {
                             for (const id of invalidIds) {
                                 await db.photos.update(id, {
@@ -160,8 +188,8 @@ export function useAIPipeline() {
                     // 3. Process Valid Items
                     if (validItems.length > 0) {
                         try {
-                            const results = await analyzePhotosBatch(validItems);
-                            logger.info("AI 返回结果数组:", results);
+                            const results = await analyzePhotosBatch(validItems, engineRef.current);
+                            logger.info("AI returned results:", results);
 
                             // Create a Map for O(1) Lookup by ID
                             const resultMap = new Map(results.map(r => [r.file_id, r]));
@@ -173,7 +201,9 @@ export function useAIPipeline() {
                                     if (res) {
                                         await db.photos.update(item.id, {
                                             score: parseFloat(String(res.score)) || 0,
-                                            reason: res.reason || "无理由",
+                                            reason: res.reason || "No reason provided",
+                                            tags: res.tags,
+                                            clip_embedding: res.clip_embedding,
                                             status: 'scored',
                                             analysisBlob: undefined, // Free up space!
                                             updatedAt: Date.now()
@@ -209,17 +239,24 @@ export function useAIPipeline() {
         } catch (error: unknown) { // Use unknown instead of any
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const err = error as any;
-            // CRITICAL: Handle Dexie DatabaseClosedError/UnknownError to prevent crash loops
-            if (err?.name === 'DatabaseClosedError' || err?.message?.includes('backing store') || err?.name === 'UnknownError') {
+            // CRITICAL: Handle Dexie DatabaseClosedError/UnknownError/ModifyError to prevent crash loops
+            const isCriticalDBError =
+                err?.name === 'DatabaseClosedError' ||
+                err?.name === 'UnknownError' ||
+                err?.name === 'ModifyError' ||
+                err?.message?.includes('backing store') ||
+                err?.message?.includes('Blob/File');
+
+            if (isCriticalDBError) {
                 logger.error("[Critical] Database corruption detected. Stopping pipeline.", err);
 
-                // Stop the recursion by ensuring mountedRef is ignored or explicitly return
+                // Stop the recursion
                 mountedRef.current = false;
 
                 // Show a persistent error toast
-                toast.error("Database Error: Corruption Detected", {
+                toast.error("Database needs reset (schema updated)", {
                     duration: Infinity,
-                    description: "Click 'Fix' to reset database and recover.",
+                    description: "Old data is incompatible. Click 'Fix' to clear and reimport.",
                     action: {
                         label: 'Fix & Reload',
                         onClick: async () => {
@@ -228,14 +265,11 @@ export function useAIPipeline() {
                         }
                     }
                 });
-                return; // STOP EXECUTION (Skip finally block logic if possible, or handle in finally)
+                return;
             }
-            logger.error("Pipeline 运行异常", error);
+            logger.error("Pipeline runtime error", error);
         } finally {
-            // 确保心跳永不停止 (除非挂了)
-            if (mountedRef.current) {
-                setTimeout(processQueue, 2000);
-            }
+            isRunningRef.current = false;
         }
     };
 

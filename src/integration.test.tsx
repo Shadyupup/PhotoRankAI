@@ -8,35 +8,22 @@ import 'fake-indexeddb/auto';
 if (!global.indexedDB) {
     const { createRequire } = await import('module');
     const require = createRequire(import.meta.url);
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     global.indexedDB = require('fake-indexeddb');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     global.IDBKeyRange = require('fake-indexeddb/lib/IDBKeyRange');
 }
 
 import { db } from './lib/db';
 
-vi.mock('@google/generative-ai', () => {
-    return {
-        GoogleGenerativeAI: class {
-            constructor() { }
-            getGenerativeModel() {
-                return {
-                    generateContent: vi.fn().mockResolvedValue({
-                        response: {
-                            text: () => JSON.stringify({
-                                results: [
-                                    { score: 8.5, reason: "Good composition and lighting." }
-                                ]
-                            })
-                        }
-                    })
-                };
-            }
-        },
-        SchemaType: { OBJECT: 'OBJECT', NUMBER: 'NUMBER', STRING: 'STRING' }
-    };
-});
+// Mock local-scorer (replaces former @google/generative-ai mock)
+vi.mock('./lib/local-scorer', () => ({
+    analyzePhotosBatch: vi.fn().mockResolvedValue([
+        { score: 8.5, reason: "Good aesthetics, decent technical quality", file_id: "test-photo-1" },
+        { score: 8.5, reason: "Good aesthetics, decent technical quality", file_id: "stuck-photo-1" }
+    ]),
+    checkScorerHealth: vi.fn().mockResolvedValue(true),
+}));
 
 // Mock Logger
 vi.mock('./lib/logger', () => ({
@@ -49,7 +36,7 @@ vi.mock('./lib/logger', () => ({
 }));
 
 // Mock Blob
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 global.Blob = class Blob {
     size = 1024;
     constructor() { }
@@ -57,7 +44,7 @@ global.Blob = class Blob {
 } as any;
 
 // Mock FileReader
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 global.FileReader = class FileReader {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onloadend: any;
@@ -94,11 +81,13 @@ describe('AI Pipeline Integration', () => {
         await db.photos.add({
             id: photoId,
             name: 'test.jpg',
-            path: '/tmp/test.jpg',
             size: 1000,
+            type: 'image/jpeg',
+            lastModified: Date.now(),
+            webkitRelativePath: '',
             status: 'queued',
             createdAt: Date.now(),
-            analysisBlob: new Blob(['fake-image-data']),
+            analysisBlob: new TextEncoder().encode('fake-image-data').buffer,
         });
 
         // 2. Render Hook
@@ -109,7 +98,7 @@ describe('AI Pipeline Integration', () => {
             const updated = await db.photos.get(photoId);
             expect(updated?.status).toBe('scored');
             expect(updated?.score).toBe(8.5);
-            expect(updated?.reason).toBe("Good composition and lighting.");
+            expect(updated?.reason).toBe("Good aesthetics, decent technical quality");
         }, { timeout: 5000 });
 
     });
@@ -123,11 +112,13 @@ describe('AI Pipeline Integration', () => {
         await db.photos.add({
             id: photoId,
             name: 'stuck.jpg',
-            path: '/tmp/stuck.jpg',
             size: 1000,
+            type: 'image/jpeg',
+            lastModified: Date.now(),
+            webkitRelativePath: '',
             status: 'analyzing', // Stuck state
             createdAt: Date.now(),
-            analysisBlob: new Blob(['fake-image-data']),
+            analysisBlob: new TextEncoder().encode('fake-image-data').buffer,
         });
 
         // 2. Render Hook (this mimics a page reload)
