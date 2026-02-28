@@ -238,42 +238,6 @@ async def get_preview(path: str):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-@app.post("/api/enhance-basic")
-async def enhance_basic(path: str = Form(...)):
-    """
-    Apply professional auto-enhancement (Auto Levels, CLAHE, White Balance,
-    Sharpening, Saturation) to an image file and return the enhanced JPEG.
-    """
-    err = _validate_image_path(path)
-    if err:
-        return JSONResponse(status_code=400, content={"error": err})
-
-    try:
-        # Read the image file (handle RAW formats too)
-        raw_extensions = {'.cr2', '.cr3', '.nef', '.arw', '.dng', '.raf', '.orf', '.rw2'}
-        ext = os.path.splitext(path)[1].lower()
-
-        if ext in raw_extensions:
-            # Decode RAW to RGB bytes first
-            with rawpy.imread(path) as raw:
-                rgb = raw.postprocess(use_camera_wb=True)
-                from PIL import Image
-                img = Image.fromarray(rgb)
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=95)
-                image_bytes = buf.getvalue()
-        else:
-            with open(path, "rb") as f:
-                image_bytes = f.read()
-
-        from enhancer import auto_enhance
-        enhanced_bytes = auto_enhance(image_bytes)
-        logger.info(f"Enhanced {os.path.basename(path)}: {len(image_bytes)} -> {len(enhanced_bytes)} bytes")
-        return Response(content=enhanced_bytes, media_type="image/jpeg")
-    except Exception as e:
-        logger.error(f"Enhancement failed for {path}: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
 
 class ClusteringRequest(BaseModel):
     items: List[dict]  # expects {"id": str, "embedding": List[float]}

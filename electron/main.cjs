@@ -124,43 +124,6 @@ ipcMain.handle('write-file-data', async (event, destDir, fileName, data) => {
     }
 });
 
-// IPC: Enhance image via Python backend (main process HTTP call bypasses CORS)
-ipcMain.handle('enhance-basic', async (event, filePath) => {
-    const http = require('http');
-    return new Promise((resolve) => {
-        const postData = `path=${encodeURIComponent(filePath)}`;
-        const options = {
-            hostname: '127.0.0.1',
-            port: 8100,
-            path: '/api/enhance-basic',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Content-Length': Buffer.byteLength(postData),
-            },
-        };
-
-        const req = http.request(options, (res) => {
-            const chunks = [];
-            res.on('data', (chunk) => chunks.push(chunk));
-            res.on('end', () => {
-                const body = Buffer.concat(chunks);
-                if (res.statusCode === 200) {
-                    resolve({ success: true, data: body });
-                } else {
-                    resolve({ success: false, error: body.toString() });
-                }
-            });
-        });
-
-        req.on('error', (err) => {
-            resolve({ success: false, error: err.message });
-        });
-
-        req.write(postData);
-        req.end();
-    });
-});
 
 // Python backend sidecar process
 let pythonProcess = null;

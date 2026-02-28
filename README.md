@@ -36,13 +36,12 @@ PhotoRank AI helps photographers automate the tedious process of selecting the b
 
 ### 🔍 Smart Features
 - **Burst Detection** — Automatically groups visually similar shots using CLIP embeddings
-- **Auto Enhance** — One-click professional enhancement (Auto Levels, CLAHE, White Balance, Sharpening)
 - **Batch Export** — Export selected photos with their scores and rankings
 
 ### 🔒 Privacy-First
 - All scoring runs **locally** on your machine
 - Images never leave your computer for scoring
-- Only Fast/Pro enhancement modes use Gemini API (optional)
+- Enhancement modes (Fast/Pro) use Gemini API (optional)
 
 ---
 
@@ -155,7 +154,6 @@ Open [http://localhost:5173](http://localhost:5173) in your browser (web mode).
 
 ### Step 4 — Enhance (Optional)
 - Select a photo and choose an enhancement mode:
-  - **Auto Enhance** — Free, runs locally (white balance, sharpening, etc.)
   - **Fast Mode** — Gemini-powered, ~30s per photo
   - **Pro Mode** — Iterative Gemini refinement, ~2min per photo
 
@@ -173,7 +171,7 @@ Open [http://localhost:5173](http://localhost:5173) in your browser (web mode).
 | **Styling** | Tailwind CSS + Framer Motion |
 | **Storage** | Dexie.js (IndexedDB) |
 | **AI Scoring** | NIMA (MobileNetV2) + CLIP (ViT-L/14) via FastAPI |
-| **Enhancement** | Google Gemini API + Pillow |
+| **Enhancement** | Google Gemini API |
 | **Desktop** | Electron |
 
 ---
@@ -188,7 +186,7 @@ Open [http://localhost:5173](http://localhost:5173) in your browser (web mode).
 ├── backend/              # Python FastAPI server
 │   ├── server.py         # API endpoints
 │   ├── scorer.py         # NIMA + CLIP scoring models
-│   ├── enhancer.py       # Pillow-based image enhancement
+
 │   └── requirements.txt  # Python dependencies
 ├── electron/             # Electron main process
 └── .env.example          # Environment variable template
@@ -205,7 +203,7 @@ The backend exposes the following endpoints at `http://localhost:8100`:
 | `GET` | `/health` | Health check — verify models are loaded |
 | `POST` | `/api/score` | Score photos (accepts file blobs or file paths) |
 | `GET` | `/api/preview?path=...` | Get image preview (auto-handles RAW files) |
-| `POST` | `/api/enhance-basic` | Apply auto-enhancement to a photo |
+
 | `POST` | `/api/cluster` | Group similar photos by CLIP embeddings |
 
 ---
@@ -217,7 +215,7 @@ The backend exposes the following endpoints at `http://localhost:8100`:
 npx vitest run
 
 # Backend unit tests (pytest)
-cd backend && python -m pytest test_scorer.py test_enhancer.py -v
+cd backend && python -m pytest test_scorer.py -v
 ```
 
 ---

@@ -30,7 +30,6 @@ declare global {
       readFile: (filePath: string) => Promise<{ success: boolean; name: string; path: string; size: number; lastModified: number; data: Uint8Array; error?: string }>;
       copyFile: (srcPath: string, destDir: string, fileName: string) => Promise<{ success: boolean; error?: string }>;
       writeFileData: (destDir: string, fileName: string, data: Uint8Array) => Promise<{ success: boolean; error?: string }>;
-      enhanceBasic: (filePath: string) => Promise<{ success: boolean; data?: Buffer; error?: string }>;
     };
   }
 }
