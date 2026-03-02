@@ -1,6 +1,7 @@
 import { ArrowDownWideNarrow, Calendar, Filter, Sparkles, Search, X, Loader2, Layers, CheckSquare, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
+import { useTranslation } from '@/i18n';
 
 export type SortMode = 'date' | 'score';
 
@@ -28,6 +29,7 @@ interface ToolbarProps {
 export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, aiFilterKeywords, onAiFilterSubmit, onAiFilterClear, aiFilterProgress, onDedupeClick, isDeduping, isGroupActive, selectedCount, totalCount, onSelectAll, onDeselectAll }: ToolbarProps) {
     const [inputValue, setInputValue] = useState('');
     const isFiltering = aiFilterProgress !== null;
+    const { t } = useTranslation();
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -45,7 +47,7 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, ai
         <div className="h-14 px-6 bg-[#0F0F0F] border-b border-[#262626] flex items-center justify-between z-20 shadow-sm">
             {/* Left: Sorting Controls */}
             <div className="flex items-center gap-4">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:block">Sort By</span>
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:block">{t('toolbar.sortBy')}</span>
                 <div className="flex bg-[#1A1A1A] p-1 rounded-lg border border-[#262626]">
                     <button
                         onClick={() => onSortChange('date')}
@@ -55,7 +57,7 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, ai
                         )}
                     >
                         <Calendar size={14} />
-                        <span className="hidden sm:inline">Date</span>
+                        <span className="hidden sm:inline">{t('toolbar.sortDate')}</span>
                     </button>
                     <button
                         onClick={() => onSortChange('score')}
@@ -65,7 +67,7 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, ai
                         )}
                     >
                         <ArrowDownWideNarrow size={14} />
-                        <span className="hidden sm:inline">Score</span>
+                        <span className="hidden sm:inline">{t('toolbar.sortScore')}</span>
                     </button>
                 </div>
 
@@ -79,10 +81,10 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, ai
                             : isGroupActive ? "bg-green-500/10 border-green-500/50 text-green-400 hover:bg-green-500/20 active:scale-95"
                                 : "bg-[#1A1A1A] border-[#262626] text-purple-400 hover:text-white hover:bg-[#262626] active:scale-95 hover:border-purple-500/50"
                     )}
-                    title={isGroupActive ? "Click to show all photos (disable grouping)" : "Group similar burst photos and keep only the best one"}
+                    title={isGroupActive ? t('toolbar.ungroupTip') : t('toolbar.groupTip')}
                 >
                     {isDeduping ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />}
-                    <span className="hidden md:inline">{isDeduping ? "Grouping..." : isGroupActive ? "Grouped ✓" : "Group Similar"}</span>
+                    <span className="hidden md:inline">{isDeduping ? t('toolbar.grouping') : isGroupActive ? t('toolbar.grouped') : t('toolbar.groupSimilar')}</span>
                 </button>
 
                 {/* Select All / Deselect All */}
@@ -97,11 +99,11 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, ai
                                 ? "bg-blue-500/10 border-blue-500/50 text-blue-400 hover:bg-blue-500/20 active:scale-95"
                                 : "bg-[#1A1A1A] border-[#262626] text-gray-400 hover:text-white hover:bg-[#262626] active:scale-95"
                     )}
-                    title={selectedCount > 0 ? "Deselect all photos" : "Select all visible photos"}
+                    title={selectedCount > 0 ? t('toolbar.deselectAllTip') : t('toolbar.selectAllTip')}
                 >
                     {selectedCount > 0 ? <CheckSquare size={14} /> : <Square size={14} />}
                     <span className="hidden md:inline">
-                        {selectedCount > 0 ? `${selectedCount} Selected` : "Select All"}
+                        {selectedCount > 0 ? `${selectedCount} ${t('toolbar.selected')}` : t('toolbar.selectAll')}
                     </span>
                 </button>
             </div>
@@ -115,7 +117,7 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, ai
                             type="text"
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
-                            placeholder="🔍 AI Smart Filter... (e.g. seal, sunset)"
+                            placeholder={t('toolbar.aiFilter')}
                             disabled={isFiltering}
                             className={cn(
                                 "w-full pl-9 pr-24 py-1.5 bg-[#1A1A1A] border rounded-lg text-sm text-white placeholder-gray-500 outline-none transition-all",
@@ -138,7 +140,7 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, ai
                                     type="button"
                                     onClick={handleClear}
                                     className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-                                    title="Clear AI filter"
+                                    title={t('toolbar.clearFilter')}
                                 >
                                     <X size={14} />
                                 </button>
@@ -157,7 +159,7 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, ai
                 {aiFilterKeywords && !isFiltering && (
                     <div className="mt-0.5 text-[10px] text-emerald-400/80 flex items-center gap-1 pl-1">
                         <Sparkles size={10} />
-                        <span>Filtered by: "{aiFilterKeywords}"</span>
+                        <span>{t('toolbar.filteredBy')}: "{aiFilterKeywords}"</span>
                     </div>
                 )}
             </div>
@@ -166,12 +168,12 @@ export function Toolbar({ sortMode, onSortChange, minScore, onMinScoreChange, ai
             <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2 text-gray-400 mr-1">
                     <Filter size={16} />
-                    <span className="text-xs font-medium uppercase tracking-wider hidden sm:block">Min Score</span>
+                    <span className="text-xs font-medium uppercase tracking-wider hidden sm:block">{t('toolbar.minScore')}</span>
                 </div>
 
                 <div className="flex items-center bg-[#1A1A1A] p-1 rounded-lg border border-[#262626]">
                     {[
-                        { label: 'ALL', value: 0, color: 'text-gray-300' },
+                        { label: t('toolbar.all'), value: 0, color: 'text-gray-300' },
                         { label: '70+', value: 70, color: 'text-blue-400' },
                         { label: '85+', value: 85, color: 'text-yellow-400' },
                         { label: '95+', value: 95, color: 'text-emerald-400' }

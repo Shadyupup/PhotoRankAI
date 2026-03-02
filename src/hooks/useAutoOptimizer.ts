@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { db, PhotoMetadata } from '@/lib/db';
-import {
-    analyzeLightingCondition,
-    detectImageContent,
-} from '@/lib/gemini';
+import { getProvider, getProviderType } from '@/lib/ai-provider';
 import { runPortraitWorkflow } from '@/lib/portrait-workflow';
 import { runLandscapeWorkflow } from '@/lib/landscape-workflow';
+import { runPortraitWorkflow as runPortraitWorkflowQwen } from '@/lib/portrait-workflow-qwen';
+import { runLandscapeWorkflow as runLandscapeWorkflowQwen } from '@/lib/landscape-workflow-qwen';
 import { logger } from '@/lib/logger';
 import { toast } from 'sonner';
 import { LOCAL_SCORER_URL } from '@/lib/local-scorer';
@@ -89,28 +88,31 @@ export function useAutoOptimizer() {
 
             // Step 0: Detect lighting conditions (using low-res for speed)
             toast.loading("Step 0: Analyzing lighting...", { id: toastId });
-            const lightingInfo = await analyzeLightingCondition(lowResBlob);
+            const provider = getProvider();
+            const lightingInfo = await provider.analyzeLightingCondition(lowResBlob);
             logger.info(`Lighting analysis: ${lightingInfo}`);
 
             // Step 1: Analyze content (using low-res for speed)
             toast.loading("Step 1: Analyzing content...", { id: toastId });
-            const contentInfo = await detectImageContent(lowResBlob);
+            const contentInfo = await provider.detectImageContent(lowResBlob);
 
             let finalResultBlob = highResBlob;
             let currentReason = "Optimization complete";
             let currentScore = 0;
 
             // Dispatch: pass both lowRes and highRes
+            const isQwen = getProviderType() === 'qwen';
             if (contentInfo.hasLivingBeings && contentInfo.subjectType === 'person') {
                 // Portrait mode
-                const res = await runPortraitWorkflow(lowResBlob, highResBlob, mode, toastId);
+                const runner = isQwen ? runPortraitWorkflowQwen : runPortraitWorkflow;
+                const res = await runner(lowResBlob, highResBlob, mode, toastId);
                 finalResultBlob = res.blob;
                 currentScore = res.score;
                 currentReason = res.reason;
             } else {
-                // Landscape mode: pass both blobs
-                // Pass mode
-                const res = await runLandscapeWorkflow(lowResBlob, highResBlob, mode, toastId);
+                // Landscape mode
+                const runner = isQwen ? runLandscapeWorkflowQwen : runLandscapeWorkflow;
+                const res = await runner(lowResBlob, highResBlob, mode, toastId);
                 finalResultBlob = res.blob;
                 currentScore = res.score;
                 currentReason = res.reason;
@@ -118,17 +120,24 @@ export function useAutoOptimizer() {
 
             // Save result (convert Blob to ArrayBuffer for DB)
             const resultBuf = await finalResultBlob.arrayBuffer();
+
+            // Score floor: Enhancement should NEVER lower the score.
+            // The workflow's NIMA score is unreliable because it scores a low-res blob.
+            // Use the higher of: workflow score, or original score.
+            const originalScore = photo.originalScore ?? photo.score ?? 0;
+            const floorScore = Math.max(currentScore, originalScore);
+
             await db.photos.update(photo.id, {
                 analysisBlob: resultBuf,
                 previewBlob: resultBuf, // Update preview
-                score: currentScore,
+                score: floorScore,
                 originalScore: photo.originalScore ?? photo.score,
                 reason: currentReason,
                 status: 'scored',
                 updatedAt: Date.now()
             });
 
-            toast.success(`Done: ${currentScore.toFixed(1)}`, { id: toastId });
+            toast.success(`Done: ${floorScore.toFixed(1)}`, { id: toastId });
             window.dispatchEvent(new CustomEvent('pipeline-wakeup'));
 
         } catch (error) {

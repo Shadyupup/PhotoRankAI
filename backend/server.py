@@ -100,6 +100,7 @@ async def score_photos(
     file_ids: List[str] = Form(...),
     files: Optional[List[UploadFile]] = File(None),
     file_paths: Optional[List[str]] = Form(None),
+    lang: Optional[str] = Form('en'),
 ):
     """
     Score multiple photos using local AI models.
@@ -175,7 +176,7 @@ async def score_photos(
     failed_ids = [file_ids[i] for i, item in enumerate(images) if item is None]
 
     # Score valid images
-    results = scorer.score_batch(valid_images) if valid_images else []
+    results = scorer.score_batch(valid_images, lang=lang or 'en') if valid_images else []
 
     # Add error results for failed loads
     for fid in failed_ids:

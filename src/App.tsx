@@ -14,6 +14,7 @@ import { logger } from '@/lib/logger';
 import { AdminDashboard } from './components/AdminDashboard';
 import { SettingsModal, getStoredApiKey } from './components/SettingsModal';
 import { AIEngine, LOCAL_SCORER_URL } from './lib/local-scorer';
+import { useTranslation } from '@/i18n';
 
 // Type for Stats
 // Pipeline statistics interface removed (now literal)
@@ -36,6 +37,7 @@ declare global {
 
 function App() {
   const { loadFiles, files, isLoading: isScanning, supportsFileSystemAccess } = useDirectoryLoader();
+  const { t } = useTranslation();
 
   const aiEngine: AIEngine = 'local-fast+vlm';
 
@@ -74,6 +76,31 @@ function App() {
     logger.info(`[Electron Import] Starting import of ${filePaths.length} files via native paths`);
     console.log(`[Electron Import] LOCAL_SCORER_URL = ${LOCAL_SCORER_URL}`);
 
+    // Filter out non-image files (videos, audio, documents, etc.)
+    const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|webp|avif|tiff|tif|bmp|cr2|cr3|nef|arw|dng|raf|orf|rw2)$/i;
+    const imageOnly = filePaths.filter(p => IMAGE_EXTENSIONS.test(p));
+    const skippedCount = filePaths.length - imageOnly.length;
+    if (skippedCount > 0) {
+      logger.warn(`[Electron Import] Skipped ${skippedCount} non-image files (videos, etc.)`);
+    }
+
+    if (imageOnly.length === 0) {
+      toast.error('No supported image files found in the selected folder.', {
+        description: `Skipped ${skippedCount} non-image files. Supported: JPG, PNG, WEBP, AVIF, DNG, RAW.`,
+        duration: 10000,
+      });
+      setIsImporting(false);
+      return;
+    }
+
+    // Check if backend is available (needed for /api/preview)
+    let backendAvailable = false;
+    try {
+      const healthResp = await fetch(`${LOCAL_SCORER_URL}/health`, { signal: AbortSignal.timeout(2000) });
+      backendAvailable = healthResp.ok;
+    } catch { backendAvailable = false; }
+    console.log(`[Electron Import] Backend available: ${backendAvailable}`);
+
     try {
       const BATCH_SIZE = 10;
       let dbBatch: any[] = [];
@@ -81,8 +108,8 @@ function App() {
       let failed = 0;
       let firstError = '';
 
-      for (let i = 0; i < filePaths.length; i++) {
-        const filePath = filePaths[i];
+      for (let i = 0; i < imageOnly.length; i++) {
+        const filePath = imageOnly[i];
         const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || filePath;
         try {
           // Check if already exists
@@ -95,20 +122,34 @@ function App() {
             continue;
           }
 
-          // Use backend /api/preview to get a JPEG (handles RAW formats via rawpy)
-          const previewUrl = `${LOCAL_SCORER_URL}/api/preview?path=${encodeURIComponent(filePath)}`;
-          console.log(`[Electron Import] Fetching preview: ${previewUrl}`);
-          const response = await fetch(previewUrl);
-          if (!response.ok) {
-            const errText = await response.text();
-            const errMsg = `Preview failed for ${fileName}: HTTP ${response.status} - ${errText}`;
-            console.error(`[Electron Import] ${errMsg}`);
-            if (!firstError) firstError = errMsg;
-            failed++;
-            continue;
+          let imageBlob: Blob;
+
+          if (backendAvailable) {
+            // Primary: Use backend /api/preview (handles RAW formats via rawpy)
+            const previewUrl = `${LOCAL_SCORER_URL}/api/preview?path=${encodeURIComponent(filePath)}`;
+            const response = await fetch(previewUrl);
+            if (!response.ok) {
+              const errText = await response.text();
+              throw new Error(`Preview HTTP ${response.status}: ${errText}`);
+            }
+            imageBlob = await response.blob();
+          } else {
+            // Fallback: Read file directly via Electron IPC
+            const result = await window.electronAPI.readFile(filePath);
+            if (!result.success) {
+              throw new Error(result.error || 'Failed to read file');
+            }
+            // Convert Buffer/ArrayBuffer to Blob
+            const buf = result.data instanceof ArrayBuffer ? result.data : (result.data as any).buffer || result.data;
+            const ext = fileName.split('.').pop()?.toLowerCase() || 'jpeg';
+            const mimeMap: Record<string, string> = {
+              'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+              'webp': 'image/webp', 'avif': 'image/avif', 'bmp': 'image/bmp',
+              'tiff': 'image/tiff', 'tif': 'image/tiff',
+            };
+            imageBlob = new Blob([buf], { type: mimeMap[ext] || 'image/jpeg' });
           }
 
-          const imageBlob = await response.blob();
           const bitmap = await createImageBitmap(imageBlob);
 
           // Create preview thumbnail (300px)
@@ -137,7 +178,7 @@ function App() {
           dbBatch.push({
             id,
             name: fileName,
-            size: 0, // Size not critical for processing
+            size: 0,
             type: 'image/jpeg',
             lastModified: Date.now(),
             webkitRelativePath: fileName,
@@ -156,7 +197,7 @@ function App() {
         }
 
         // Flush to DB periodically
-        if (dbBatch.length >= BATCH_SIZE || i === filePaths.length - 1) {
+        if (dbBatch.length >= BATCH_SIZE || i === imageOnly.length - 1) {
           if (dbBatch.length > 0) {
             try {
               await db.transaction('rw', db.photos, async () => {
@@ -175,14 +216,20 @@ function App() {
         }
       }
 
+      const msg = skippedCount > 0
+        ? `Imported ${imported} photos (skipped ${skippedCount} non-image files${failed > 0 ? `, ${failed} failed` : ''})`
+        : `Imported ${imported} photos${failed > 0 ? ` (${failed} failed)` : ''}`;
+
       if (failed > 0 && imported === 0) {
         toast.error(`Import failed: ${failed} photos could not be imported`, {
           description: firstError ? `First error: ${firstError.substring(0, 200)}` : undefined,
           duration: 15000,
         });
       } else {
-        toast.success(`Imported ${imported} photos${failed > 0 ? ` (${failed} failed)` : ''}`, {
-          description: 'Starting AI analysis...'
+        toast.success(msg, {
+          description: !backendAvailable
+            ? 'Note: Backend not running. Start it for RAW file support and AI scoring.'
+            : 'Starting AI analysis...'
         });
       }
     } catch (err: any) {
@@ -219,8 +266,8 @@ function App() {
   // Keyboard shortcut for Admin
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Use Alt+Shift+A for Admin
-      if (e.altKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+      // Use Alt+Shift+A for Admin (use e.code for Mac compatibility — Option+Shift+A produces 'Å')
+      if (e.altKey && e.shiftKey && e.code === 'KeyA') {
         setIsAdminOpen(prev => !prev);
       }
     };
@@ -761,19 +808,19 @@ function App() {
   };
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const isGeminiKeyMissing = !import.meta.env.VITE_GEMINI_API_KEY && !getStoredApiKey();
+  const isGeminiKeyMissing = !import.meta.env.VITE_GEMINI_API_KEY && !import.meta.env.VITE_DASHSCOPE_API_KEY && !getStoredApiKey();
 
   return (
     <div className="flex flex-col h-screen bg-[#0F0F0F] text-white overflow-hidden font-sans selection:bg-blue-500/30">
       <Toaster position="bottom-right" theme="dark" />
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} onOpenAdmin={() => setIsAdminOpen(true)} />
 
       {/* Gemini API Key Info (only show when no key and no photos loaded yet) */}
       {isGeminiKeyMissing && stats.total === 0 && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 bg-amber-500/90 backdrop-blur-md text-black px-4 py-2 rounded-full border border-amber-400/50 shadow-2xl flex items-center gap-2">
           <span className="text-xs font-bold">⚙️</span>
-          <span className="text-xs font-medium">Gemini API key not set (needed for Fast/Pro modes).</span>
-          <button onClick={() => setIsSettingsOpen(true)} className="text-xs font-bold underline underline-offset-2 hover:text-amber-900">Open Settings</button>
+          <span className="text-xs font-medium">{t('apiKeyBanner.message')}</span>
+          <button onClick={() => setIsSettingsOpen(true)} className="text-xs font-bold underline underline-offset-2 hover:text-amber-900">{t('apiKeyBanner.openSettings')}</button>
         </div>
       )}
 
@@ -832,9 +879,9 @@ function App() {
                   <FolderOpen className="text-blue-400" size={28} />
                 </div>
               </div>
-              <h2 className="text-xl font-bold text-white mb-2 animate-pulse">Scanning Folder...</h2>
+              <h2 className="text-xl font-bold text-white mb-2 animate-pulse">{t('scanning.title')}</h2>
               <p className="text-gray-400 text-sm max-w-sm text-center leading-relaxed">
-                Discovering and importing your photos. This may take a moment for large folders.
+                {t('scanning.description')}
               </p>
               <div className="mt-6 flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -856,9 +903,9 @@ function App() {
               <div className="w-20 h-20 rounded-full bg-[#1A1A1A] flex items-center justify-center mb-6 shadow-2xl border border-[#262626]">
                 <Upload className={cn("transition-colors duration-300", isDragOver ? "text-blue-500" : "text-gray-500")} size={32} />
               </div>
-              <h2 className="text-2xl font-bold mb-3 text-white">Drag & Drop or Select Photos</h2>
+              <h2 className="text-2xl font-bold mb-3 text-white">{t('empty.title')}</h2>
               <p className="text-gray-500 text-sm max-w-sm text-center mb-8 leading-relaxed">
-                Start by selecting a folder or individual photos. AI will automatically analyze lighting, composition, and aesthetics locally.
+                {t('empty.description')}
               </p>
               {/* Separate buttons: select photos vs select folder */}
               <div className="flex gap-4">
@@ -866,14 +913,14 @@ function App() {
                   onClick={handleSelectPhotos}
                   className="flex items-center gap-2 bg-[#1A1A1A] hover:bg-[#262626] text-white border border-[#333] px-6 py-3 rounded-xl font-semibold transition-all active:scale-95"
                 >
-                  <ImagePlus size={18} className="text-blue-500" /> Select Photos
+                  <ImagePlus size={18} className="text-blue-500" /> {t('empty.selectPhotos')}
                 </button>
 
                 <button
                   onClick={handleSelectFolder}
                   className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-semibold shadow-lg shadow-blue-600/20 hover:scale-105 transition-all active:scale-95"
                 >
-                  <FolderOpen size={18} /> Select Folder
+                  <FolderOpen size={18} /> {t('empty.selectFolder')}
                 </button>
               </div>
 

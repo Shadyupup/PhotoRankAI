@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
-import { testGeminiConnection } from '@/lib/gemini';
+import { getProvider } from '@/lib/ai-provider';
 import { X, RefreshCw, Trash2, Search, CheckCircle2, AlertCircle, Clock, Loader2, Database, Wifi } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { logger } from '@/lib/logger';
@@ -137,7 +137,7 @@ export function AdminDashboard({ onClose, onRetry }: AdminDashboardProps) {
                             onClick={async () => {
                                 try {
                                     toast.loading("Testing Gemini Connection...");
-                                    const result = await testGeminiConnection();
+                                    const result = await getProvider().testConnection();
                                     toast.dismiss();
                                     toast.success("Connection Successful!", { description: `Response: ${result}` });
                                 } catch (e: unknown) {

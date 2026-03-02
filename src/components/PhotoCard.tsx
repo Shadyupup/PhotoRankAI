@@ -5,6 +5,7 @@ import { Check, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ScoreBadge } from './ScoreBadge';
 import { LOCAL_SCORER_URL } from '@/lib/local-scorer';
+import { useTranslation } from '@/i18n';
 
 interface PhotoCardProps {
     photo: PhotoMetadata;
@@ -19,6 +20,7 @@ interface PhotoCardProps {
 export const PhotoCard = memo(({ photo, style, className, selected, onToggleSelect, onView, onReject }: PhotoCardProps) => {
     const [src, setSrc] = useState<string | null>(null);
     const [loadFailed, setLoadFailed] = useState<boolean>(false);
+    const { t } = useTranslation();
 
     // Lazy-load preview: try previewBlob → analysisBlob → original file handle
     useEffect(() => {
@@ -127,7 +129,7 @@ export const PhotoCard = memo(({ photo, style, className, selected, onToggleSele
                         }}
                     >
                         <X className="w-8 h-8 mb-2 opacity-50 text-red-400" />
-                        <span className="text-xs font-medium text-center px-4">Local file missing<br /><span className="text-blue-400 underline mt-1 block">Click to re-link folder</span></span>
+                        <span className="text-xs font-medium text-center px-4">{t('card.fileMissing')}<br /><span className="text-blue-400 underline mt-1 block">{t('card.clickToRelink')}</span></span>
                     </div>
                 ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-700">

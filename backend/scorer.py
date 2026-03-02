@@ -247,7 +247,7 @@ class CombinedScorer:
         res = self.score_batch([("single", image)])
         return {k: v for k, v in res[0].items() if k != "file_id"}
 
-    def score_batch(self, images: List[Tuple[str, Image.Image]]) -> List[Dict]:
+    def score_batch(self, images: List[Tuple[str, Image.Image]], lang: str = 'en') -> List[Dict]:
         """
         Score a batch of images using RRF rank fusion.
         Args: list of (file_id, PIL.Image) tuples
@@ -277,7 +277,7 @@ class CombinedScorer:
                 clip_norm = (c_score - 1.0) / 9.0
                 final_score = round((0.3 * nima_norm + 0.7 * clip_norm) * 100.0, 1)
                 final_score = max(0.0, min(100.0, final_score))
-                reason = self._generate_reason(n_score, c_score, final_score)
+                reason = self._generate_reason(n_score, c_score, final_score, lang)
                 results.append({
                     "file_id": file_ids[0],
                     "score": final_score,
@@ -329,7 +329,7 @@ class CombinedScorer:
                 c_score = clip_scores[i]
                 final_score = round(float(normalized[i]), 1)
                 final_score = max(0.0, min(100.0, final_score))
-                reason = self._generate_reason(n_score, c_score, final_score)
+                reason = self._generate_reason(n_score, c_score, final_score, lang)
                 
                 results.append({
                     "file_id": file_id,
@@ -353,32 +353,52 @@ class CombinedScorer:
         return results
 
     @staticmethod
-    def _generate_reason(nima: float, clip: float, final: float) -> str:
+    def _generate_reason(nima: float, clip: float, final: float, lang: str = 'en') -> str:
         """Generate a human-readable reason based on score breakdown."""
         parts = []
 
-        # Aesthetic assessment (based on CLIP 1-10 scale)
-        if clip >= 8.0:
-            parts.append("Excellent aesthetics")
-        elif clip >= 6.5:
-            parts.append("Good aesthetics")
-        elif clip >= 5.0:
-            parts.append("Average aesthetics")
+        if lang == 'zh':
+            # Chinese aesthetic assessment
+            if clip >= 8.0:
+                parts.append("优秀的美感")
+            elif clip >= 6.5:
+                parts.append("良好的美感")
+            elif clip >= 5.0:
+                parts.append("一般的美感")
+            else:
+                parts.append("较差的美感")
+
+            # Chinese technical quality
+            if nima >= 7.5:
+                parts.append("高技术质量")
+            elif nima >= 5.5:
+                parts.append("尚可的技术质量")
+            else:
+                parts.append("较低的技术质量")
+
+            parts.append(f"[RRF: {final:.0f}/100, 美感={clip:.1f}, 技术={nima:.1f}]")
+            return "，".join(parts)
         else:
-            parts.append("Below-average aesthetics")
+            # English aesthetic assessment
+            if clip >= 8.0:
+                parts.append("Excellent aesthetics")
+            elif clip >= 6.5:
+                parts.append("Good aesthetics")
+            elif clip >= 5.0:
+                parts.append("Average aesthetics")
+            else:
+                parts.append("Below-average aesthetics")
 
-        # Technical quality (based on NIMA 1-10 scale)
-        if nima >= 7.5:
-            parts.append("high technical quality")
-        elif nima >= 5.5:
-            parts.append("decent technical quality")
-        else:
-            parts.append("low technical quality")
+            # English technical quality
+            if nima >= 7.5:
+                parts.append("high technical quality")
+            elif nima >= 5.5:
+                parts.append("decent technical quality")
+            else:
+                parts.append("low technical quality")
 
-        # RRF final score
-        parts.append(f"[RRF: {final:.0f}/100, aesthetic={clip:.1f}, technical={nima:.1f}]")
-
-        return ", ".join(parts)
+            parts.append(f"[RRF: {final:.0f}/100, aesthetic={clip:.1f}, technical={nima:.1f}]")
+            return ", ".join(parts)
 
 
 def load_image_from_bytes(data: bytes) -> Image.Image:
