@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
     copyFile: (srcPath, destDir, fileName) => ipcRenderer.invoke('copy-file', srcPath, destDir, fileName),
     writeFileData: (destDir, fileName, data) => ipcRenderer.invoke('write-file-data', destDir, fileName, data),
+    saveEnhancedFile: (originalPath, data) => ipcRenderer.invoke('save-enhanced-file', originalPath, data),
 });

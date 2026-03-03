@@ -33,6 +33,7 @@ export interface PhotoMetadata {
 
     handle?: FileSystemFileHandle; // For zero-upload access
     filePath?: string; // Absolute path from Electron's File.path
+    enhancedFilePath?: string; // Path to the enhanced image saved on disk
 
     // AI Results
     score?: number;

@@ -86,36 +86,44 @@ export function useAutoOptimizer() {
 
             // ============================================================
 
-            // Step 0: Detect lighting conditions (using low-res for speed)
-            toast.loading("Step 0: Analyzing lighting...", { id: toastId });
-            const provider = getProvider();
-            const lightingInfo = await provider.analyzeLightingCondition(lowResBlob);
-            logger.info(`Lighting analysis: ${lightingInfo}`);
-
-            // Step 1: Analyze content (using low-res for speed)
-            toast.loading("Step 1: Analyzing content...", { id: toastId });
-            const contentInfo = await provider.detectImageContent(lowResBlob);
-
             let finalResultBlob = highResBlob;
             let currentReason = "Optimization complete";
             let currentScore = 0;
 
-            // Dispatch: pass both lowRes and highRes
             const isQwen = getProviderType() === 'qwen';
-            if (contentInfo.hasLivingBeings && contentInfo.subjectType === 'person') {
-                // Portrait mode
-                const runner = isQwen ? runPortraitWorkflowQwen : runPortraitWorkflow;
-                const res = await runner(lowResBlob, highResBlob, mode, toastId);
-                finalResultBlob = res.blob;
-                currentScore = res.score;
-                currentReason = res.reason;
-            } else {
-                // Landscape mode
+
+            if (mode === 'instant') {
+                // FAST MODE: Skip analysis, go directly to evaluate + enhance
+                // Only 2 Gemini calls: evaluate → generate (instead of 4)
+                toast.loading("Fast: Evaluating & enhancing...", { id: toastId });
                 const runner = isQwen ? runLandscapeWorkflowQwen : runLandscapeWorkflow;
                 const res = await runner(lowResBlob, highResBlob, mode, toastId);
                 finalResultBlob = res.blob;
                 currentScore = res.score;
                 currentReason = res.reason;
+            } else {
+                // PRO MODE: Full pipeline with content detection for portrait vs landscape
+                toast.loading("Step 0: Analyzing lighting...", { id: toastId });
+                const provider = getProvider();
+                const lightingInfo = await provider.analyzeLightingCondition(lowResBlob);
+                logger.info(`Lighting analysis: ${lightingInfo}`);
+
+                toast.loading("Step 1: Analyzing content...", { id: toastId });
+                const contentInfo = await provider.detectImageContent(lowResBlob);
+
+                if (contentInfo.hasLivingBeings && contentInfo.subjectType === 'person') {
+                    const runner = isQwen ? runPortraitWorkflowQwen : runPortraitWorkflow;
+                    const res = await runner(lowResBlob, highResBlob, mode, toastId);
+                    finalResultBlob = res.blob;
+                    currentScore = res.score;
+                    currentReason = res.reason;
+                } else {
+                    const runner = isQwen ? runLandscapeWorkflowQwen : runLandscapeWorkflow;
+                    const res = await runner(lowResBlob, highResBlob, mode, toastId);
+                    finalResultBlob = res.blob;
+                    currentScore = res.score;
+                    currentReason = res.reason;
+                }
             }
 
             // Save result (convert Blob to ArrayBuffer for DB)
@@ -127,6 +135,21 @@ export function useAutoOptimizer() {
             const originalScore = photo.originalScore ?? photo.score ?? 0;
             const floorScore = Math.max(currentScore, originalScore);
 
+            // Save enhanced image to disk for reliable export
+            let enhancedFilePath: string | undefined;
+            if (window.electronAPI && photo.filePath) {
+                try {
+                    const data = Array.from(new Uint8Array(resultBuf));
+                    const saveResult = await window.electronAPI.saveEnhancedFile(photo.filePath, data);
+                    if (saveResult.success && saveResult.path) {
+                        enhancedFilePath = saveResult.path;
+                        console.log(`[AutoOptimizer] Saved enhanced file: ${enhancedFilePath}`);
+                    }
+                } catch (e) {
+                    console.warn('[AutoOptimizer] Failed to save enhanced file to disk', e);
+                }
+            }
+
             await db.photos.update(photo.id, {
                 analysisBlob: resultBuf,
                 previewBlob: resultBuf, // Update preview
@@ -134,6 +157,7 @@ export function useAutoOptimizer() {
                 originalScore: photo.originalScore ?? photo.score,
                 reason: currentReason,
                 status: 'scored',
+                enhancedFilePath,
                 updatedAt: Date.now()
             });
 
@@ -143,6 +167,11 @@ export function useAutoOptimizer() {
         } catch (error) {
             console.error(error);
             toast.error("Enhancement failed: " + (error instanceof Error ? error.message : "Unknown error"), { id: toastId });
+            // Clean up: remove originalBlob backup if enhancement failed
+            // Otherwise export will mistake this photo as "enhanced"
+            try {
+                await db.photos.update(photo.id, { originalBlob: undefined } as any);
+            } catch { /* ignore cleanup errors */ }
         } finally {
             setIsOptimizing(false);
         }

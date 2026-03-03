@@ -145,8 +145,35 @@ export async function generateImageInternal(
         }
 
         return base64ToBlob(imagePart.inlineData.data, imagePart.inlineData.mimeType || "image/jpeg");
-    } catch (error) {
+    } catch (error: any) {
         logger.error(`[${modelName}] Generation failed`, error);
+
+        // Automatic Fallback Logic
+        // If the primary image model fails due to quota (429) or high demand (503/499)
+        // gracefully fallback to the pro image model
+        const isImageModel = modelName.includes('image');
+        const isFlashModel = modelName.includes('flash');
+        const errorString = String(error).toLowerCase();
+
+        const isQuotaOrDemandError =
+            errorString.includes('429') || // Resource Exhausted / Quota Exceeded
+            errorString.includes('503') || // Service Unavailable / High Demand
+            errorString.includes('499') || // Operation Cancelled
+            errorString.includes('quota') ||
+            errorString.includes('resource exhausted') ||
+            errorString.includes('high demand');
+
+        if (isImageModel && isFlashModel && isQuotaOrDemandError) {
+            const fallbackModel = 'gemini-3-pro-image-preview';
+            logger.warn(`[Nano Banana] ⚠️ ${modelName} exhausted/unavailable. Falling back to ${fallbackModel}...`);
+
+            // Wait briefly before retrying
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Retry once with the fallback model
+            return generateImageInternal(fallbackModel, inputs, configOverrides);
+        }
+
         throw error;
     }
 }

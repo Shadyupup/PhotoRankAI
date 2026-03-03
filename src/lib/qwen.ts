@@ -123,14 +123,28 @@ export async function qwenEditImage(
 
     const data = await response.json();
 
-    // 从响应中提取图片 URL
-    const imageUrl = data?.output?.choices?.[0]?.message?.content?.[0]?.image;
+    // DashScope image editing returns results in different formats:
+    // Async task result: output.results[0].url
+    // Chat completion style: output.choices[0].message.content[0].image
+    let imageUrl: string | undefined;
+
+    // Format 1: Async task result (from our proxy polling)
+    const results = data?.output?.results;
+    if (results && results.length > 0) {
+        imageUrl = results[0]?.url;
+    }
+
+    // Format 2: Chat completion style (direct API)
+    if (!imageUrl) {
+        imageUrl = data?.output?.choices?.[0]?.message?.content?.[0]?.image;
+    }
+
     if (!imageUrl) {
         logger.error('[千问] 响应中无图片:', JSON.stringify(data));
         throw new Error('千问模型未返回图片');
     }
 
-    // 下载生成的图片
+    // Download the generated image
     logger.info(`[千问] 下载生成的图片: ${imageUrl.substring(0, 80)}...`);
     const imageResponse = await fetch(imageUrl);
     if (!imageResponse.ok) {

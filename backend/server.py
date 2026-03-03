@@ -95,6 +95,86 @@ async def health():
     }
 
 
+# --- DashScope Proxy (Qwen image editing needs server-side proxy for CORS) ---
+
+class DashScopeProxyRequest(BaseModel):
+    api_key: str
+    payload: dict
+
+@app.post("/api/proxy/dashscope")
+async def proxy_dashscope(req: DashScopeProxyRequest):
+    """
+    Proxy requests to DashScope image editing API.
+    DashScope doesn't support browser CORS, so we forward from backend.
+    """
+    import httpx
+
+    DASHSCOPE_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image2image/image-synthesis"
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                DASHSCOPE_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {req.api_key}",
+                    "X-DashScope-Async": "enable",
+                },
+                json=req.payload,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"DashScope API error: {response.status_code} {response.text}")
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content={"error": response.text}
+                )
+
+            result = response.json()
+            logger.info(f"DashScope initial response: {result}")
+
+            # DashScope async mode: poll for result
+            task_id = result.get("output", {}).get("task_id")
+            if not task_id:
+                # Synchronous response (unlikely but handle it)
+                return result
+
+            # Poll task status
+            TASK_URL = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
+            for _ in range(60):  # Max 60 polls × 2s = 120s timeout
+                import asyncio
+                await asyncio.sleep(2)
+                
+                status_resp = await client.get(
+                    TASK_URL,
+                    headers={"Authorization": f"Bearer {req.api_key}"},
+                )
+                
+                if status_resp.status_code != 200:
+                    continue
+                    
+                status_data = status_resp.json()
+                task_status = status_data.get("output", {}).get("task_status")
+                
+                logger.info(f"DashScope task {task_id}: {task_status}")
+                
+                if task_status == "SUCCEEDED":
+                    return status_data
+                elif task_status in ("FAILED", "UNKNOWN"):
+                    return JSONResponse(
+                        status_code=500,
+                        content={"error": f"DashScope task failed: {status_data}"}
+                    )
+            
+            return JSONResponse(
+                status_code=504,
+                content={"error": "DashScope task timed out"}
+            )
+
+    except Exception as e:
+        logger.error(f"DashScope proxy error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 @app.post("/api/score")
 async def score_photos(
     file_ids: List[str] = Form(...),

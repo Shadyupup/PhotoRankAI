@@ -30,7 +30,8 @@ declare global {
       selectPhotoFolder: () => Promise<string[] | null>;
       readFile: (filePath: string) => Promise<{ success: boolean; name: string; path: string; size: number; lastModified: number; data: Uint8Array; error?: string }>;
       copyFile: (srcPath: string, destDir: string, fileName: string) => Promise<{ success: boolean; error?: string }>;
-      writeFileData: (destDir: string, fileName: string, data: Uint8Array) => Promise<{ success: boolean; error?: string }>;
+      writeFileData: (destDir: string, fileName: string, data: Uint8Array | number[]) => Promise<{ success: boolean; error?: string }>;
+      saveEnhancedFile: (originalPath: string, data: number[]) => Promise<{ success: boolean; path?: string; error?: string }>;
     };
   }
 }
@@ -318,6 +319,8 @@ function App() {
             lastModified: record.lastModified,
             webkitRelativePath: record.webkitRelativePath,
             handle: record.handle,
+            filePath: record.filePath,
+            enhancedFilePath: record.enhancedFilePath,
             score: record.score,
             originalScore: record.originalScore,
             reason: record.reason,
@@ -767,22 +770,19 @@ function App() {
         try {
           let result: { success: boolean; error?: string };
 
-          if (photo.originalBlob && photo.analysisBlob) {
-            // Enhanced photo: export the polished version from DB
-            const data = new Uint8Array(photo.analysisBlob);
-            result = await window.electronAPI!.writeFileData(destDir, photo.name, data);
+          if (photo.enhancedFilePath) {
+            // Enhanced photo saved to disk: copy the enhanced file
+            console.log(`[Export] ${photo.name}: → ENHANCED FILE (${photo.enhancedFilePath})`);
+            const enhancedName = photo.enhancedFilePath.split('/').pop()!;
+            result = await window.electronAPI!.copyFile(photo.enhancedFilePath, destDir, enhancedName);
           } else if (photo.filePath) {
-            // Un-enhanced: copy original file from disk (full quality)
+            // Copy original high-res file from disk
+            console.log(`[Export] ${photo.name}: → ORIGINAL (copyFile)`);
             result = await window.electronAPI!.copyFile(photo.filePath, destDir, photo.name);
           } else {
-            // Fallback: write DB blob to file
-            const blob = photo.analysisBlob || photo.previewBlob;
-            if (!blob) {
-              fail++;
-              continue;
-            }
-            const data = new Uint8Array(blob);
-            result = await window.electronAPI!.writeFileData(destDir, photo.name, data);
+            console.log(`[Export] ${photo.name}: → SKIP (no data)`);
+            fail++;
+            continue;
           }
 
           if (result.success) {

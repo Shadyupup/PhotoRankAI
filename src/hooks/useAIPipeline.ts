@@ -82,7 +82,7 @@ export function useAIPipeline(paused = false, engine: AIEngine = 'local-fast') {
             clearInterval(intervalId);
             window.removeEventListener('pipeline-wakeup', wakeUp);
         };
-         
+
     }, []);
 
     const processQueue = async () => {
@@ -199,15 +199,26 @@ export function useAIPipeline(paused = false, engine: AIEngine = 'local-fast') {
                                     const res = resultMap.get(item.id);
 
                                     if (res) {
-                                        await db.photos.update(item.id, {
+                                        // Check if this photo was enhanced (originalBlob = backup of pre-enhancement)
+                                        // If enhanced, we MUST keep analysisBlob — it's the enhanced image for export!
+                                        const fullRecord = await db.photos.get(item.id);
+                                        const isEnhanced = !!fullRecord?.originalBlob;
+
+                                        const updatePayload: Record<string, any> = {
                                             score: parseFloat(String(res.score)) || 0,
                                             reason: res.reason || "No reason provided",
                                             tags: res.tags,
                                             clip_embedding: res.clip_embedding,
                                             status: 'scored',
-                                            analysisBlob: undefined, // Free up space!
                                             updatedAt: Date.now()
-                                        });
+                                        };
+                                        // Only free analysisBlob for non-enhanced photos
+                                        // Enhanced photos need analysisBlob preserved for export
+                                        if (!isEnhanced) {
+                                            updatePayload.analysisBlob = undefined;
+                                        }
+
+                                        await db.photos.update(item.id, updatePayload);
                                     } else {
                                         logger.warn(`Missing result for ID: ${item.id} - Re-queuing`);
                                         await db.photos.update(item.id, {

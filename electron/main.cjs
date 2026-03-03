@@ -117,13 +117,56 @@ ipcMain.handle('copy-file', async (event, srcPath, destDir, fileName) => {
 ipcMain.handle('write-file-data', async (event, destDir, fileName, data) => {
     try {
         const destPath = path.join(destDir, fileName);
-        await fs.promises.writeFile(destPath, Buffer.from(data));
+        // IPC may serialize Uint8Array to various formats; handle all cases
+        let buf;
+        if (Buffer.isBuffer(data)) {
+            buf = data;
+        } else if (data instanceof Uint8Array) {
+            buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+        } else if (Array.isArray(data)) {
+            buf = Buffer.from(data);
+        } else {
+            // IPC structured clone may produce a plain object with numeric keys
+            buf = Buffer.from(Object.values(data));
+        }
+        console.log(`[writeFileData] Writing ${fileName}: ${buf.length} bytes`);
+        await fs.promises.writeFile(destPath, buf);
         return { success: true };
     } catch (err) {
+        console.error(`[writeFileData] Failed: ${err.message}`);
         return { success: false, error: err.message };
     }
 });
 
+// IPC: Save enhanced image to disk next to original file
+ipcMain.handle('save-enhanced-file', async (event, originalPath, data) => {
+    try {
+        // Generate enhanced file path: /path/to/photo.JPG → /path/to/photo_enhanced.JPG
+        const ext = path.extname(originalPath);
+        const baseName = path.basename(originalPath, ext);
+        const dir = path.dirname(originalPath);
+        const enhancedPath = path.join(dir, `${baseName}_enhanced${ext}`);
+
+        // Handle IPC data serialization (same as writeFileData)
+        let buf;
+        if (Buffer.isBuffer(data)) {
+            buf = data;
+        } else if (data instanceof Uint8Array) {
+            buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+        } else if (Array.isArray(data)) {
+            buf = Buffer.from(data);
+        } else {
+            buf = Buffer.from(Object.values(data));
+        }
+
+        console.log(`[saveEnhancedFile] Saving ${enhancedPath}: ${buf.length} bytes`);
+        await fs.promises.writeFile(enhancedPath, buf);
+        return { success: true, path: enhancedPath };
+    } catch (err) {
+        console.error(`[saveEnhancedFile] Failed: ${err.message}`);
+        return { success: false, error: err.message };
+    }
+});
 
 // Python backend sidecar process
 let pythonProcess = null;

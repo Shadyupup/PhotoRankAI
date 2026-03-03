@@ -1,5 +1,7 @@
 # PhotoRank AI 📸
 
+[📖 简体中文文档 (Chinese Readme)](README_zh.md)
+
 **AI-Powered Professional Photo Culling & Enhancement Tool**
 
 PhotoRank AI helps photographers automate the tedious process of selecting the best shots from thousands of images. Import a folder, let AI score every photo, then enhance your favorites — all running locally on your machine.
@@ -16,16 +18,21 @@ PhotoRank AI helps photographers automate the tedious process of selecting the b
 - **Batch processing** — Score hundreds of photos in minutes with GPU acceleration
 - **Reciprocal Rank Fusion (RRF)** — Combines NIMA & CLIP rankings for reliable scoring
 
-### � Supported Image Formats
+### 🌍 Multilingual UI & Flexible AI
+- **i18n Support** — Seamlessly switch between English and Chinese (简体中文) interfaces.
+- **Multiple AI Providers** — Use Google Gemini or Alibaba Qwen (千问) for enhancements.
+- **Smart Fallback** — Automatically switches to a backup model if the primary one hits rate limits.
+
+### 🖼️ Supported Image Formats
 | Type | Formats |
 |------|---------|
 | **Standard** | JPG, JPEG, PNG, WEBP, AVIF, TIFF, BMP |
 | **RAW** | CR2, CR3 (Canon), NEF (Nikon), ARW (Sony), DNG, RAF (Fuji), ORF (Olympus), RW2 (Panasonic) |
 
-### �🖼️ Two Enhancement Modes
+### 🎨 Two Enhancement Modes
 | Mode | Speed | How It Works |
 |------|-------|--------------|
-| **Fast** 🔵 | ~30s | Single-pass AI enhancement via Gemini |
+| **Fast** 🔵 | ~25s | Direct AI evaluation and enhancement (Gemini or Qwen) |
 | **Pro** 🟣 | ~2min | Iterative AI refinement with critique loop |
 
 <p align="center">
@@ -36,16 +43,16 @@ PhotoRank AI helps photographers automate the tedious process of selecting the b
 
 ### 🔍 Smart Features
 - **Burst Detection** — Automatically groups visually similar shots using CLIP embeddings
-- **Batch Export** — Export selected photos with their scores and rankings
+- **Batch Export** — Export selected photos with their high-resolution enhanced images saved directly to disk.
 
 ### 🔒 Privacy-First
 - All scoring runs **locally** on your machine
 - Images never leave your computer for scoring
-- Enhancement modes (Fast/Pro) use Gemini API (optional)
+- Enhancement requires API keys (Gemini or DashScope), both processed securely locally.
 
 ---
 
-## � System Requirements
+## 💻 System Requirements
 
 ### Minimum Requirements
 | Component | Requirement |
@@ -102,21 +109,22 @@ The backend starts on `http://localhost:8100`. It auto-downloads AI models on fi
 > [!NOTE]
 > The NIMA model (~50 MB) downloads instantly. The CLIP model (~1.7 GB) may take a few minutes on first launch.
 
-### 3. (Optional) Set Gemini API Key
+### 3. (Optional) Set API Keys
 
-For **Fast** and **Pro** enhancement modes, you need a Gemini API key.
+For **Fast** and **Pro** enhancement modes, you need an API key (Gemini or DashScope).
 
 **Option A — Via the UI (recommended):**
-Click the ⚙️ Settings gear in the top-right corner and paste your key.
+Click the ⚙️ Settings gear in the top-right corner, select your provider, and paste your key.
 
 **Option B — Via .env file:**
 ```bash
 cp .env.example .env
 # Edit .env and add your key:
 # VITE_GEMINI_API_KEY=your_key_here
+# VITE_DASHSCOPE_API_KEY=your_dashscope_key_here
 ```
 
-Get a free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+Get a free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) or [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com/).
 
 > [!NOTE]
 > AI scoring works **without** any API key. Only the enhancement feature requires one.
@@ -154,8 +162,8 @@ Open [http://localhost:5173](http://localhost:5173) in your browser (web mode).
 
 ### Step 4 — Enhance (Optional)
 - Select a photo and choose an enhancement mode:
-  - **Fast Mode** — Gemini-powered, ~30s per photo
-  - **Pro Mode** — Iterative Gemini refinement, ~2min per photo
+  - **Fast Mode** — Direct Gemini/Qwen generation, ~25s per photo
+  - **Pro Mode** — Iterative AI refinement, ~2min per photo
 
 ### Step 5 — Export
 - Select the photos you want to keep
@@ -171,7 +179,7 @@ Open [http://localhost:5173](http://localhost:5173) in your browser (web mode).
 | **Styling** | Tailwind CSS + Framer Motion |
 | **Storage** | Dexie.js (IndexedDB) |
 | **AI Scoring** | NIMA (MobileNetV2) + CLIP (ViT-L/14) via FastAPI |
-| **Enhancement** | Google Gemini API |
+| **Enhancement** | Google Gemini API / Alibaba DashScope API |
 | **Desktop** | Electron |
 
 ---
@@ -186,7 +194,6 @@ Open [http://localhost:5173](http://localhost:5173) in your browser (web mode).
 ├── backend/              # Python FastAPI server
 │   ├── server.py         # API endpoints
 │   ├── scorer.py         # NIMA + CLIP scoring models
-
 │   └── requirements.txt  # Python dependencies
 ├── electron/             # Electron main process
 └── .env.example          # Environment variable template
@@ -203,7 +210,6 @@ The backend exposes the following endpoints at `http://localhost:8100`:
 | `GET` | `/health` | Health check — verify models are loaded |
 | `POST` | `/api/score` | Score photos (accepts file blobs or file paths) |
 | `GET` | `/api/preview?path=...` | Get image preview (auto-handles RAW files) |
-
 | `POST` | `/api/cluster` | Group similar photos by CLIP embeddings |
 
 ---
